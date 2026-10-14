@@ -303,7 +303,7 @@ def _operate_locked(home, platform, uninstall, target, kit, mcp=None):
             shutil.copy2(LEARNING / 'README.md', staging / 'LEARNING.md')
             staged_learning = staging / 'learning'
             staged_learning.mkdir()
-            for name in ('cli.py', 'mcp_server.py', 'MCP.md'):
+            for name in ('cli.py', 'mcp_server.py', 'prompt_hook.py', 'MCP.md'):
                 shutil.copy2(LEARNING / name, staged_learning / name)
             staged_policy = staging / 'WORK_STANDARDS.md'
             shutil.copy2(SOURCE / 'skills/work-standards/SKILL.md', staged_policy)

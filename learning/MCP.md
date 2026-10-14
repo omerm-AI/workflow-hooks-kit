@@ -37,6 +37,22 @@ proof. Classic chat, offline operation, managed restrictions, plugin refresh,
 and unavailable connectors require separate runtime evidence. Weekly ingestion
 into another preference framework is not implemented by this broker.
 
+## Local command checkpoint alternative
+
+`prompt_hook.py` accepts a native UserPromptSubmit JSON event on stdin and calls
+the same broker library directly. It does not depend on an MCP connection for
+receipt capture. Required operator arguments are `--state-dir` and optionally
+`--policy-root`, using absolute private paths. It preserves the shared store
+and agent/scheduled exclusions. Ordinary chat returns `{}`; invalid input
+produces a short warning and no success receipt.
+
+This adapter is bundled but not automatically registered by the installer.
+Only register it on a client that executes hooks on the intended local host.
+A hosted command hook writes to its sandbox, not to a Mac store. Review native
+trust before activation and test actual old/new sessions; a subprocess test
+is not native callback proof. Scoped policy reads still require the connected
+MCP tool when the returned pointer is used.
+
 Run broker tests with `python3 -B -m unittest discover -s tests -v`, and CLI
 tests with `python3 -B -m unittest discover -s learning -p 'test*.py' -v`.
 
