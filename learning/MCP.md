@@ -46,12 +46,27 @@ receipt capture. Required operator arguments are `--state-dir` and optionally
 and agent/scheduled exclusions. Ordinary chat returns `{}`; invalid input
 produces a short warning and no success receipt.
 
+Native identity fields differ: Codex supplies `turn_id`; Claude Code supplies
+`prompt_id`. The adapter accepts either and rejects conflicting values rather
+than generating a replacement. One overwritten, bounded local diagnostic
+(`last-prompt-hook.json`, at most 2 KiB) records fixed field types, hashed
+identifiers and an outcome. It contains no prompt, directory or arbitrary input
+keys. `broker_returned` is not a success receipt: exempt events may return
+without capture. Match receipt hashes to the actual native event to verify it.
+
 This adapter is bundled but not automatically registered by the installer.
 Only register it on a client that executes hooks on the intended local host.
 A hosted command hook writes to its sandbox, not to a Mac store. Review native
 trust before activation and test actual old/new sessions; a subprocess test
 is not native callback proof. Scoped policy reads still require the connected
 MCP tool when the returned pointer is used.
+
+A hosted Cowork probe completed a first user message without invoking the
+configured MCP checkpoint. Manual connector access worked separately. This
+does not establish automatic hosted coverage; a connected tool and a saved
+hook definition must not be presented as an operational pre-model checkpoint.
+App-dispatched test prompts also require separate evidence from user-submitted
+prompts. No fallback silently creates a synthetic success receipt.
 
 Run broker tests with `python3 -B -m unittest discover -s tests -v`, and CLI
 tests with `python3 -B -m unittest discover -s learning -p 'test*.py' -v`.
