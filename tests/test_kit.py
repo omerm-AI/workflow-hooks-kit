@@ -187,6 +187,65 @@ class InstallerTests(HomeFixture):
             result = subprocess.run([sys.executable, '-B', str(installed), '--help'], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_optional_mcp_shared_store_runtime_and_reversible_ownership(self):
+        shared = self.home / 'shared learning'
+        for platform in (('codex', 'claude') if sys.version_info >= (3, 11) else ('claude',)):
+            installer.operate(self.home, platform)
+            target = self.home / ('.codex/config.toml' if platform == 'codex' else '.claude.json')
+            self.assertFalse(target.exists())
+            original = 'model = "fixture"' if platform == 'codex' else '{"fixture": true}'
+            target.write_text(original)
+            for _ in range(2):
+                installer.operate(self.home, platform, learning_mcp=True, state_dir=shared)
+            if platform == 'codex':
+                import tomllib
+                definition = tomllib.loads(target.read_text())['mcp_servers'][installer.MCP_NAME]
+            else:
+                definition = json.loads(target.read_text())['mcpServers'][installer.MCP_NAME]
+            runtime = Path(definition['args'][1])
+            self.assertEqual(runtime.read_bytes(), (ROOT / 'learning/mcp_server.py').read_bytes())
+            self.assertEqual((runtime.parent / 'cli.py').read_bytes(), (ROOT / 'learning/cli.py').read_bytes())
+            request = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2024-11-05'}}) + '\n'
+            request += json.dumps({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}) + '\n'
+            result = subprocess.run([definition['command'], *definition['args']], input=request, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('learning_status', result.stdout)
+            installer.operate(self.home, platform, uninstall=True)
+            if platform == 'codex':
+                self.assertEqual(target.read_text(), original)
+            else:
+                self.assertEqual(json.loads(target.read_text()), json.loads(original))
+            self.assertTrue(shared.exists())
+
+    def test_mcp_collisions_and_changed_owned_definitions_preserved(self):
+        for platform in (('codex', 'claude') if sys.version_info >= (3, 11) else ('claude',)):
+            installer.operate(self.home, platform)
+            target = self.home / ('.codex/config.toml' if platform == 'codex' else '.claude.json')
+            collision = '[mcp_servers.workflow_learning]\ncommand = "foreign"\n' if platform == 'codex' else '{"mcpServers":{"workflow_learning":{"command":"foreign"}}}'
+            target.write_text(collision)
+            with self.assertRaises(ValueError):
+                installer.operate(self.home, platform, learning_mcp=True)
+            self.assertEqual(target.read_text(), collision)
+            target.write_text('' if platform == 'codex' else '{}')
+            installer.operate(self.home, platform, learning_mcp=True)
+            edited = target.read_text().replace('mcp_server.py', 'edited_server.py')
+            target.write_text(edited)
+            with self.assertRaises(ValueError):
+                installer.operate(self.home, platform, learning_mcp=True)
+            installer.operate(self.home, platform, uninstall=True)
+            self.assertEqual(target.read_text(), edited)
+
+    def test_optional_plugin_configuration_and_adjacent_runtime(self):
+        output = self.home / 'optional.plugin'
+        builder.build(output, learning_mcp=True, state_dir=self.home / 'shared')
+        with zipfile.ZipFile(output) as archive:
+            definition = json.loads(archive.read('.mcp.json'))['mcpServers']['workflow_learning']
+            self.assertEqual(definition['args'][1], '${CLAUDE_PLUGIN_ROOT}/learning/mcp_server.py')
+            self.assertIn('learning/cli.py', archive.namelist())
+            self.assertEqual(archive.read('learning/mcp_server.py'), (ROOT/'learning/mcp_server.py').read_bytes())
+        with self.assertRaises(ValueError):
+            builder.build(output, learning_mcp=True)
+
     def test_build_deterministic_and_python_syntax(self):
         first, second = self.home/'first.plugin', self.home/'second.plugin'
         builder.build(first)
@@ -195,6 +254,8 @@ class InstallerTests(HomeFixture):
         with zipfile.ZipFile(first) as archive:
             self.assertIn('learning/cli.py', archive.namelist())
             self.assertIn('learning/README.md', archive.namelist())
+            self.assertIn('learning/mcp_server.py', archive.namelist())
+            self.assertNotIn('.mcp.json', archive.namelist())
             self.assertFalse(any('test_cli' in name or 'state.json' in name for name in archive.namelist()))
         for path in ROOT.rglob('*.py'):
             if 'Old' not in path.parts:

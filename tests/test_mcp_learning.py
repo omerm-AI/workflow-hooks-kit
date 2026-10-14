@@ -72,6 +72,18 @@ class LearningMcpTests(unittest.TestCase):
         self.assertNotIn('untrusted', (self.root/'mcp-receipts.json').read_text())
         self.assertFalse((self.root/'state.json').exists())
 
+    def test_status_reports_recent_observations_after_sorted_disk_reload(self):
+        for number in range(7):
+            self.broker.call('prompt_checkpoint', {'session_id': 'sample-' + str(number), 'turn_id': 'first'})
+        index = self.broker.receipts()
+        for number, record in enumerate(index['receipts'].values()):
+            record['last_observed_at'] = '2026-10-14T00:00:0%d+00:00' % number
+            record['observed_at'] = '2026-10-14T00:00:00+00:00'
+        mcp.cli.atomic_write(self.broker.receipt_file, self.broker.store.encoded(index))
+        expected = sorted(index['receipts'].values(), key=lambda r: r['last_observed_at'], reverse=True)[:3]
+        actual = mcp.Broker(self.root).call('learning_status', {})['receipts']
+        self.assertEqual(actual, expected)
+
     def test_explicit_requests_pending_and_source_dedup_conflict(self):
         output = self.checkpoint(prompt='מעכשיו Keep controls visible.')
         self.assertEqual(output['proposal']['status'], 'pending')

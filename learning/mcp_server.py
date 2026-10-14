@@ -259,7 +259,10 @@ class Broker:
                         'receipt_count': len(index['receipts']), 'receipt_limit': MAX_RECEIPTS,
                         'receipt_unit': 'sessions', 'maintenance_required': False,
                         'archived_batches': index['overflow_count'],
-                        'overflow_count': index['overflow_count'], 'receipts': list(index['receipts'].values())[-3:]}
+                        'overflow_count': index['overflow_count'],
+                        'receipts': sorted(index['receipts'].values(),
+                                           key=lambda r: (r['last_observed_at'], r['receipt_id']),
+                                           reverse=True)[:3]}
             session = text_value(args['session_id'], 'session ID', 160)
             turn = text_value(args['turn_id'], 'turn ID', 160)
             if 'cwd' in args:
