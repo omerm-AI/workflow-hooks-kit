@@ -66,7 +66,10 @@ configured MCP checkpoint. Manual connector access worked separately. This
 does not establish automatic hosted coverage; a connected tool and a saved
 hook definition must not be presented as an operational pre-model checkpoint.
 App-dispatched test prompts also require separate evidence from user-submitted
-prompts. No fallback silently creates a synthetic success receipt.
+prompts. A subsequent operator-level test matched actual human-submitted Codex
+events in an existing and a newly created session to broker receipt hashes.
+This verifies that deployed local command adapter, not every installation or
+the hosted path. No fallback silently creates a synthetic success receipt.
 
 Run broker tests with `python3 -B -m unittest discover -s tests -v`, and CLI
 tests with `python3 -B -m unittest discover -s learning -p 'test*.py' -v`.
