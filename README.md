@@ -45,6 +45,8 @@ Ten mechanisms are explained in [coverage](docs/coverage.md). Hooks validate loc
 
 [Local signed receipts](docs/hook-receipts.md) bind a one-use marker to hashed event identities, time and installed runtime version. They do not authenticate native origin by themselves. [The optional response-language hook](docs/response-language.md) includes a controlled native Code Local enabled/disabled sample with matching static instructions excluded. That sample does not establish every future response, Cowork, Codex or ordinary GPT behavior. Install language support explicitly with `python3 tools/configure_language.py --language he` (or `en`); it adds bounded context even to conversation. The base installer does not enable this optional hook.
 
+[The native Agent observer](docs/delegation-observer.md) records bounded requested/resolved model metadata with a signed data-bound marker. Its controlled Code Local pilot observed an actual worker, but does not enforce model selection or certify parent QA. It is not automatically registered by the base installer.
+
 ## Privacy and optional integrations
 
 The runtime reads incoming hook JSON, recognized tool inputs, the kit's local state, configuration for plugin deduplication, and narrowly declared local file assertions. It does not collect transcripts, access credentials, call models or send data over a network. Ledgers contain local session/turn identifiers, project paths, declared plans and QA text; do not put secrets in those declarations. Input text is used transiently for classification and is not retained. Runtime failures are generally fail-open, so this is a workflow aid rather than a security sandbox.
