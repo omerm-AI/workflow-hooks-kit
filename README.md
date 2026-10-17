@@ -41,6 +41,10 @@ See [the workflow contract](docs/workflow.md) for compact and substantial JSON e
 
 Ten mechanisms are explained in [coverage](docs/coverage.md). Hooks validate local declarations and recognized tool boundaries; they cannot prove actual reviewer/model identity or every shell side effect. Generic MCP writes remain unchecked. Stop blocks at most once per ledger and then reports remaining issues; escaping a Stop block is never a success certificate.
 
+## Optional event evidence and language
+
+[Local signed receipts](docs/hook-receipts.md) bind a one-use marker to hashed event identities, time and installed runtime version. They do not authenticate native origin by themselves. [The optional response-language hook](docs/response-language.md) includes a controlled native Code Local enabled/disabled sample with matching static instructions excluded. That sample does not establish every future response, Cowork, Codex or ordinary GPT behavior. Install language support explicitly with `python3 tools/configure_language.py --language he` (or `en`); it adds bounded context even to conversation. The base installer does not enable this optional hook.
+
 ## Privacy and optional integrations
 
 The runtime reads incoming hook JSON, recognized tool inputs, the kit's local state, configuration for plugin deduplication, and narrowly declared local file assertions. It does not collect transcripts, access credentials, call models or send data over a network. Ledgers contain local session/turn identifiers, project paths, declared plans and QA text; do not put secrets in those declarations. Input text is used transiently for classification and is not retained. Runtime failures are generally fail-open, so this is a workflow aid rather than a security sandbox.

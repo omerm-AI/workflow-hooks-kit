@@ -70,8 +70,9 @@ class RuntimeTests(HomeFixture):
             with self.subTest(tool_name=tool_name):
                 result = core.run(self.event('PreToolUse', tool_name, {'description': 'delegate'}))
                 self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
-        ledger = workflow._read(workflow._ledger_path('fixture-session', 'fixture-turn'))
-        self.assertEqual(ledger['task_kind'], 'substantial')
+        self.assertFalse(workflow.STATE.exists())
+        self.assertEqual(workflow._stop(self.event('Stop')), {})
+        self.assertIn('Do not retry Agent', self.reason(result))
         self.assertIn('stages', self.reason(result))
 
     def test_native_delegation_rejects_missing_identity(self):
@@ -131,6 +132,11 @@ class RuntimeTests(HomeFixture):
                    'cwd': str(self.project), 'tool_name': 'Agent', 'tool_input': {}}
         result = core.run(payload, claude=True)
         self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertFalse(core.CLAUDE_STATE.exists())
+        command = 'workflow-ledger plan ' + shlex.quote(json.dumps(self.substantial_plan()))
+        saved = core.run({**payload, 'tool_name': 'Bash', 'tool_input': {'command': command}}, claude=True)
+        self.assertIn('Plan saved', self.reason(saved))
+        self.assertEqual(core.run(payload, claude=True), {})
         self.assertTrue(core.CLAUDE_STATE.exists())
 
     def test_native_delegation_corrupt_state_denies_compactly(self):

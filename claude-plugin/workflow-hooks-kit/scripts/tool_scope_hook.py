@@ -19,6 +19,7 @@ import tempfile
 from typing import Any
 
 import session_workflow_hook as workflow
+import delegation_gate
 
 MAX_INPUT = 1_000_000
 MAX_BODY = 32_768
@@ -28,7 +29,7 @@ MAX_PATH_CHARS = 4096
 MAX_LEDGER = workflow.MAX_LEDGER
 CLAUDE_STATE = Path.home() / ".claude" / "workflow-hooks-kit"
 EDIT_TOOLS = {"Edit", "Write", "apply_patch", "NotebookEdit", "MultiEdit"}
-DELEGATION_TOOLS = {"Agent", "spawn_agent"}
+DELEGATION_TOOLS = delegation_gate.DELEGATION_TOOLS
 RG_FLAGS = {"--no-config", "--files", "--hidden", "--no-ignore", "--no-ignore-vcs", "--no-messages", "--line-number", "--files-with-matches", "--files-without-match", "--count", "--count-matches", "--ignore-case", "--fixed-strings", "--word-regexp", "--invert-match", "--only-matching", "--json", "--stats", "--quiet", "--no-heading", "--heading", "--with-filename", "--no-filename", "-n", "-l", "-L", "-c", "-i", "-F", "-w", "-v", "-o", "-q"}
 RG_VALUES = {"--glob", "--iglob", "--regexp", "--file", "--max-count", "--max-depth", "--type", "--type-not", "--context", "--before-context", "--after-context", "--color", "-g", "-e", "-f", "-m", "-t", "-T", "-C", "-B", "-A"}
 PATCH_PATH = re.compile(r"^[ \t]*\*\*\*[ \t]+(?:(?:Add|Update|Delete)[ \t]+File|Move[ \t]+to):[ \t]*(.*?)[ \t]*$", re.M)
@@ -609,37 +610,7 @@ def _pre(p: dict[str, Any], state: Path) -> dict[str, Any]:
     if event != "PreToolUse":
         return {}
     if tool in DELEGATION_TOOLS:
-        sid, tid = _ids(p)
-        if not sid or not tid:
-            return _deny(event, "Native session/turn ID missing; delegation requires an identified substantial plan.")
-        ok, actual, root = _protected_scope(p, state)
-        if not ok:
-            return _deny(event, actual[:300])
-        path, ledger = _load_existing(p, state)
-        if path is not None and path.exists() and ledger is None:
-            return _deny(event, "Task ledger is invalid or mismatched; repair it before delegation.")
-        if ledger is None:
-            path, ledger = _ensure_ledger(p, state, root, "substantial")
-            if path is None or ledger is None:
-                return _deny(event, "Could not create a protected substantial ledger; verify native IDs and project access.")
-            return _deny(event, "Prepare a substantial ledger: numbered stages, workers, DoD, outputs, qa.check and qa.expected; then retry.")
-        if ledger.get("task_kind") != "substantial":
-            return _deny(event, "Delegation requires a substantial plan with numbered stages, worker, DoD, outputs and checks.")
-        if (type(ledger.get("schema_version")) is not int or ledger.get("schema_version") != 1
-                or ledger.get("session_id") != sid
-                or ledger.get("turn_id") != tid or workflow._root_hint(ledger.get("working_root")) != root):
-            return _deny(event, "Substantial ledger schema or protected identity is invalid; repair it before delegation.")
-        if ledger.get("state") in {"complete", "blocked", "awaiting-user"}:
-            return _deny(event, "This task is terminal or blocked; resolve it in a new active turn before delegation.")
-        try:
-            plan_valid = workflow._plan_ready(ledger) and _plan_shape(_prepared_plan_body(ledger)) == "substantial"
-        except (ValueError, TypeError, KeyError, AttributeError):
-            plan_valid = False
-        if not plan_valid:
-            return _deny(event, "Prepare a substantial ledger: numbered stages, workers, DoD, outputs, qa.check and qa.expected; then retry.")
-        if ledger.get("state") != "in-progress":
-            return _deny(event, "Substantial plan is not active; resume or prepare an active plan before delegation.")
-        return {}
+        return delegation_gate.check(sys.modules[__name__], p, state)
     if tool == "Bash":
         command = data.get("command")
         parsed = _parse_ledger_command(command)

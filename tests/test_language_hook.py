@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(HOOK.parent))
 import configure_language as language_config
 import hook_receipt
+import session_workflow_hook as workflow_hook
 
 
 class LanguageHookTests(unittest.TestCase):
@@ -32,14 +33,35 @@ class LanguageHookTests(unittest.TestCase):
         result = self.run_hook(json.dumps({'hook_event_name': 'UserPromptSubmit', 'prompt': 'What time is it?'}))
         context = result['hookSpecificOutput']['additionalContext']
         self.assertIn('עברית', context)
-        self.assertLessEqual(len(context), 120)
         self.assertIn('באנגלית', context)
+        self.assertTrue(context.startswith('ענה בעברית;'))
+        self.assertLessEqual(len(context), 43)
         self.assertNotRegex(context, r'\[wf:[^]]+\]')
 
     def test_english_and_session_start_are_supported(self):
         for event in ('UserPromptSubmit', 'SessionStart'):
             result = self.run_hook(json.dumps({'hook_event_name': event}), 'en')
-            self.assertIn('English', result['hookSpecificOutput']['additionalContext'])
+            self.assertIn('Reply in English', result['hookSpecificOutput']['additionalContext'])
+            self.assertLessEqual(len(result['hookSpecificOutput']['additionalContext']), 43)
+
+    def test_stamped_language_context_fits_with_actual_workflow_substantial_context(self):
+        # Exercise the workflow hook's real context builder; isolate only its ledger write.
+        with patch.object(workflow_hook, 'start_task', return_value=None):
+            workflow_result = workflow_hook._prompt({
+                'hook_event_name': 'UserPromptSubmit',
+                'prompt': 'Implement a system for Example.',
+                'session_id': 'fixture-session', 'turn_id': 'fixture-turn', 'cwd': '/tmp',
+            })
+        workflow_context = workflow_result['hookSpecificOutput']['additionalContext']
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            result = self.run_hook(json.dumps({
+                'hook_event_name': 'UserPromptSubmit', 'session_id': 's', 'prompt_id': 't',
+                'prompt': 'What time is it?',
+            }), 'he', '--state-dir', str(Path(directory) / 'state'))
+            language_context = result['hookSpecificOutput']['additionalContext']
+            self.assertRegex(language_context, r'\[wf:[0-9a-f]{16}:[0-9a-f]{32}\]')
+            # The actual public workflow context plus stamped language context must stay <= 300.
+            self.assertLessEqual(len(workflow_context) + len(language_context), 300)
 
     def test_disabled_unknown_nested_and_no_invocation_emit_nothing(self):
         payload = json.dumps({'hook_event_name': 'UserPromptSubmit', 'prompt': 'Hello'})
@@ -71,7 +93,7 @@ class LanguageHookTests(unittest.TestCase):
                        'prompt_id': 'turn-real', 'prompt': 'private prompt'}
             result = self.run_hook(json.dumps(payload), 'he', '--state-dir', str(state))
             context = result['hookSpecificOutput']['additionalContext']
-            self.assertLessEqual(len(context), 120)
+            self.assertLessEqual(len(context), 98)
             marker_match = re.search(r'\[wf:([0-9a-f]{16}:[0-9a-f]{32})\]', context)
             self.assertIsNotNone(marker_match)
             marker = marker_match.group(1)
@@ -93,7 +115,7 @@ class LanguageHookTests(unittest.TestCase):
             result = self.run_hook(json.dumps({'hook_event_name': 'SessionStart', 'session_id': 'session-start'}),
                                    'en', '--state-dir', str(state))
             context = result['hookSpecificOutput']['additionalContext']
-            self.assertLessEqual(len(context), 120)
+            self.assertLessEqual(len(context), 98)
             marker = re.search(r'\[wf:([0-9a-f]{16}:[0-9a-f]{32})\]', context).group(1)
             version = hashlib.sha256(HOOK.read_bytes() + (HOOK.parent / 'hook_receipt.py').read_bytes()).hexdigest()
             receipt = hook_receipt.verify(state, marker, 'session-start', None, 'SessionStart',

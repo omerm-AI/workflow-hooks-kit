@@ -17,8 +17,8 @@ MAX_DIAGNOSTIC = 2_048
 MAX_CONTEXT = 120
 RECEIPT_MARKER_LENGTH = 49
 DIRECTIVES = {
-    'he': 'ענה בעברית; שמור קוד, שמות קבצים, פקודות ומונחי Git באנגלית.',
-    'en': 'Answer in English; preserve code, filenames, commands, Git terms.',
+    'he': 'ענה בעברית; קוד/קבצים/פקודות/Git באנגלית',
+    'en': 'Reply in English; keep code/files/cmds/Git.',
 }
 EVENTS = {'UserPromptSubmit', 'SessionStart'}
 IDENTITY_FIELDS = ('session_id', 'turn_id', 'prompt_id')
