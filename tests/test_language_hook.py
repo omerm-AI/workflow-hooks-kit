@@ -1,7 +1,9 @@
 import hashlib
+import concurrent.futures
 import json
 import os
 import re
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -28,6 +30,167 @@ class LanguageHookTests(unittest.TestCase):
         result = subprocess.run(args, input=payload, text=True, capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout or '{}')
+
+    def _receipt_version(self):
+        return hashlib.sha256(HOOK.read_bytes() + (HOOK.parent / 'hook_receipt.py').read_bytes()).hexdigest()
+
+    def _assert_has_marker(self, result):
+        context = result['hookSpecificOutput']['additionalContext']
+        match = re.search(r'\[wf:([0-9a-f]{16}:[0-9a-f]{32})\]', context)
+        self.assertIsNotNone(match)
+        return match.group(1)
+
+    def test_session_bootstrap_skips_later_prompt_but_restart_reemits(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            state = Path(directory) / 'state'
+            start = self.run_hook(json.dumps({'hook_event_name': 'SessionStart', 'session_id': 'boot-session',
+                                              'source': 'startup'}),
+                                  'he', '--state-dir', str(state))
+            marker = self._assert_has_marker(start)
+            hook_receipt.verify(state, marker, 'boot-session', None, 'SessionStart',
+                                self._receipt_version(), 'success')
+            cache_path = next(state.glob('language-session-*.json'))
+            cache = json.loads(cache_path.read_text())
+            self.assertNotIn('boot-session', cache_path.read_text())
+            self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(cache_path.stat().st_mode), 0o600)
+            self.assertLessEqual(cache_path.stat().st_size, 512)
+            self.assertEqual(cache['session_hash'], hashlib.sha256(b'boot-session').hexdigest())
+            skipped = self.run_hook(json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'boot-session',
+                                                'prompt_id': 'prompt-1', 'prompt': 'Hello'}),
+                                    'he', '--state-dir', str(state))
+            self.assertEqual(skipped, {})
+            skipped_path = next(path for path in state.glob('batch-*/**/*.json')
+                                if json.loads(path.read_text())['outcome'] == 'skipped')
+            skipped_marker = skipped_path.parent.name.removeprefix('batch-') + ':' + skipped_path.stem
+            hook_receipt.verify(state, skipped_marker, 'boot-session', 'prompt-1', 'UserPromptSubmit',
+                                self._receipt_version(), 'skipped')
+            resumed = self.run_hook(json.dumps({'hook_event_name': 'SessionStart', 'session_id': 'boot-session',
+                                                'source': 'compact'}),
+                                     'he', '--state-dir', str(state))
+            self._assert_has_marker(resumed)
+
+    def test_old_session_gets_one_prompt_bootstrap_and_sessions_are_independent(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            state = Path(directory) / 'state'
+            def submit(session, prompt):
+                return self.run_hook(json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': session,
+                                                 'prompt_id': prompt, 'prompt': 'Hello'}),
+                                     'he', '--state-dir', str(state))
+            first_a = submit('old-a', 'a1')
+            self._assert_has_marker(first_a)
+            self.assertEqual(submit('old-a', 'a2'), {})
+            first_b = submit('old-b', 'b1')
+            self._assert_has_marker(first_b)
+            self.assertEqual(submit('old-b', 'b2'), {})
+
+    def test_language_or_version_change_refreshes_once(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            state = Path(directory) / 'state'
+            def submit(language, turn):
+                return self.run_hook(json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'refresh',
+                                                 'prompt_id': turn, 'prompt': 'Hello'}),
+                                     language, '--state-dir', str(state))
+            self._assert_has_marker(submit('he', 'he-bootstrap'))
+            self._assert_has_marker(submit('en', 'en-bootstrap'))
+            self.assertEqual(submit('en', 'en-skip'), {})
+            cache = next(state.glob('language-session-*.json'))
+            data = json.loads(cache.read_text())
+            data['version_hash'] = 'stale-version'
+            cache.write_text(json.dumps(data))
+            self._assert_has_marker(submit('en', 'version-refresh'))
+            self.assertEqual(submit('en', 'version-skip'), {})
+
+    def test_concurrent_prompts_emit_at_most_one_and_cache_symlink_never_fakes_skip(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            base = Path(directory)
+            state = base / 'state'
+            payloads = [json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'concurrent',
+                                    'prompt_id': f'turn-{index}', 'prompt': 'Hello'}) for index in range(8)]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(lambda p: self.run_hook(p, 'he', '--state-dir', str(state)), payloads))
+            self.assertEqual(sum(bool(result) for result in results), 1)
+            self.assertEqual(sum('hookSpecificOutput' in result for result in results), 1)
+
+            other_state = base / 'other-state'
+            other_state.mkdir(mode=0o700)
+            session_hash = hashlib.sha256(b'cache-failure').hexdigest()
+            target = base / 'foreign-cache'
+            target_bytes = b'{"version_hash":"current"}'
+            target.write_bytes(target_bytes)
+            (other_state / f'language-session-{session_hash}.json').symlink_to(target)
+            failure_payload = json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'cache-failure',
+                                          'prompt_id': 'cache-failure-turn', 'prompt': 'Hello'})
+            emitted = self.run_hook(failure_payload, 'he', '--state-dir', str(other_state))
+            self._assert_has_marker(emitted)
+            self.assertEqual(target.read_bytes(), target_bytes)
+
+    def test_cache_lock_failure_and_missing_turn_never_suppress_directive(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            base = Path(directory)
+            state = base / 'state'
+            first_payload = json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'lock-session',
+                                        'prompt_id': 'first', 'prompt': 'Hello'})
+            self._assert_has_marker(self.run_hook(first_payload, 'he', '--state-dir', str(state)))
+            lock_path = state / '.language-cache.lock'
+            lock_path.unlink()
+            lock_target = base / 'lock-target'
+            lock_target.write_text('foreign')
+            lock_path.symlink_to(lock_target)
+            next_payload = json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'lock-session',
+                                       'prompt_id': 'second', 'prompt': 'Hello'})
+            emitted = self.run_hook(next_payload, 'he', '--state-dir', str(state))
+            self.assertIn('ענה בעברית', emitted['hookSpecificOutput']['additionalContext'])
+            self._assert_has_marker(emitted)
+
+            missing_turn = json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': 'lock-session',
+                                       'prompt': 'Hello'})
+            emitted_missing = self.run_hook(missing_turn, 'he', '--state-dir', str(state))
+            self.assertIn('ענה בעברית', emitted_missing['hookSpecificOutput']['additionalContext'])
+            self.assertNotEqual(emitted_missing, {})
+            missing_session = json.dumps({'hook_event_name': 'UserPromptSubmit', 'prompt_id': 'turn-3',
+                                          'prompt': 'Hello'})
+            emitted_no_session = self.run_hook(missing_session, 'he', '--state-dir', str(state))
+            self.assertIn('ענה בעברית', emitted_no_session['hookSpecificOutput']['additionalContext'])
+            self.assertNotEqual(emitted_no_session, {})
+
+    def test_corrupt_cache_does_not_suppress_and_is_replaced_safely(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            state = Path(directory) / 'state'
+            state.mkdir(mode=0o700)
+            session = 'corrupt-cache-session'
+            cache = state / ('language-session-' + hashlib.sha256(session.encode()).hexdigest() + '.json')
+            cache.write_text('{broken')
+            os.chmod(cache, 0o600)
+            payload = json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': session,
+                                  'prompt_id': 'turn-1', 'prompt': 'Hello'})
+            emitted = self.run_hook(payload, 'he', '--state-dir', str(state))
+            self._assert_has_marker(emitted)
+            repaired = json.loads(cache.read_text())
+            self.assertEqual(repaired['session_hash'], hashlib.sha256(session.encode()).hexdigest())
+            self.assertNotIn(session, cache.read_text())
+
+    def test_noninteger_schema_values_never_match_cache(self):
+        for bad_schema in (True, 1.0):
+            with self.subTest(schema=bad_schema), tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+                state = Path(directory) / 'state'
+                state.mkdir(mode=0o700)
+                session = f'bad-schema-{type(bad_schema).__name__}'
+                version = self._receipt_version()
+                cache = state / ('language-session-' + hashlib.sha256(session.encode()).hexdigest() + '.json')
+                cache.write_text(json.dumps({
+                    'schema': bad_schema,
+                    'session_hash': hashlib.sha256(session.encode()).hexdigest(),
+                    'language': 'he', 'version_hash': version,
+                }))
+                os.chmod(cache, 0o600)
+                payload = json.dumps({'hook_event_name': 'UserPromptSubmit', 'session_id': session,
+                                      'prompt_id': 'turn-1', 'prompt': 'Hello'})
+                emitted = self.run_hook(payload, 'he', '--state-dir', str(state))
+                self._assert_has_marker(emitted)
+                repaired = json.loads(cache.read_text())
+                self.assertIs(type(repaired['schema']), int)
+                self.assertEqual(repaired['schema'], 1)
 
     def test_neutral_prompt_gets_configured_hebrew_directive(self):
         result = self.run_hook(json.dumps({'hook_event_name': 'UserPromptSubmit', 'prompt': 'What time is it?'}))
@@ -76,6 +239,15 @@ class LanguageHookTests(unittest.TestCase):
                                 text=True, capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 0)
         self.assertEqual(json.loads(result.stdout or '{}'), {})
+
+    def test_omitted_state_dir_keeps_always_emit_fallback(self):
+        payload = {'hook_event_name': 'UserPromptSubmit', 'session_id': 'without-state',
+                   'prompt_id': 'turn', 'prompt': 'Hello'}
+        first = self.run_hook(json.dumps(payload), 'he')
+        second = self.run_hook(json.dumps({**payload, 'prompt_id': 'turn-2'}), 'he')
+        self.assertEqual(first['hookSpecificOutput']['additionalContext'],
+                         second['hookSpecificOutput']['additionalContext'])
+        self.assertNotIn('[wf:', first['hookSpecificOutput']['additionalContext'])
 
     def test_bad_language_and_malformed_or_oversized_input_fail_open(self):
         for raw in ('{broken', 'x' * 32769, json.dumps({'hook_event_name': 'UserPromptSubmit', 'agent_id': []})):
