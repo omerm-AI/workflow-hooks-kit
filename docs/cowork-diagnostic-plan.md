@@ -2,6 +2,30 @@
 
 Status: planned. This document is not runtime acceptance or a deployment claim.
 
+## Investigation checkpoint — 2026-10-17
+
+The read-only boundary investigation and one final route candidate were run in
+native Cowork. Command hooks fired in a fresh session with the exact installed
+package bytes. A model-invoked host connector read also succeeded. Routing the
+MCP hook through the observed `remote-devices` server/tool naming still produced
+no matching host receipt, both cold and after a successful read warmed the
+connection. Active and archived host receipts were checked. The default cloud
+receipt file was absent. The prior account package was restored; no new route
+is advertised as working and no universal rollout is claimed.
+
+Two diagnostic pitfalls were caught: native Bash and device command tools can
+run in different filesystems, and the kit's health record retains only the
+first event of each type. A saved fixture or old health mtime is not liveness
+evidence. An existing cloud session can retain older plugin files while account
+metadata displays the newer version; inspect actual loaded bytes separately.
+
+The effective MCP inventory available to the hook dispatcher and its exact
+failure reason remain unknown. This result does not prove a vendor defect.
+The repair-iteration review gate now applies; do not add more wiring variants
+without operator review. A version-pinned retest after an official client
+update is an option, not an established remedy. The remaining plan below stays
+open, including policy consumption and the complete learning lifecycle.
+
 ## Outcome and known evidence
 
 An actual human submission in an existing and a new supported Cowork session
