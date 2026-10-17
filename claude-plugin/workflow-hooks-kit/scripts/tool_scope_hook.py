@@ -931,6 +931,8 @@ def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
                 intercepted = isinstance(command, str) and bool(re.match(r"^\s*[\'\"]?workflow-ledger", command))
             if intercepted:
                 return _deny("PreToolUse", f"Ledger command intercepted; handler error: {type(exc).__name__}. No shell command executed.")
+        if _event(payload) == "PreToolUse" and _tool_name(payload) in EDIT_TOOLS | {"Bash"}:
+            return _deny("PreToolUse", f"Hook enforcement failed: {type(exc).__name__}; operation denied.")
         return {"systemMessage": f"Tool scope hook error (fail-open): {type(exc).__name__}: {exc}"}
     finally:
         workflow.STATE = original_state
