@@ -1,4 +1,5 @@
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -54,10 +55,10 @@ class DelegationGuardTests(unittest.TestCase):
     def config_path(self, platform):
         return self.home / ('.codex/hooks.json' if platform == 'codex' else '.claude/settings.json')
 
-    def configure(self, platform='codex', uninstall=False):
-        return delegation_config.configure(self.home, platform, self.core_dir, uninstall)
+    def configure(self, platform='codex', uninstall=False, model_map=None):
+        return delegation_config.configure(self.home, platform, self.core_dir, uninstall, model_map)
 
-    def run_guard(self, payload, platform='codex'):
+    def run_guard(self, payload, platform='codex', model_map=None):
         folder = '.codex' if platform == 'codex' else '.claude'
         kit = self.home / folder / 'workflow-hooks-kit'
         script = kit / 'bin/delegation-guard/delegation_guard.py'
@@ -65,6 +66,8 @@ class DelegationGuardTests(unittest.TestCase):
                 '--state-dir', str(kit / 'delegation-receipts')]
         if platform == 'claude':
             args.append('--claude')
+        if model_map is not None:
+            args.extend(['--model-map', str(model_map)])
         env = {**os.environ, 'HOME': str(self.home)}
         result = subprocess.run(args, input=json.dumps(payload), text=True, capture_output=True,
                                 timeout=10, env=env)
@@ -459,6 +462,259 @@ print(json.dumps({"result":result,"ledger":json.loads(path.read_text()),"bytes":
                                   env={**os.environ, 'HOME': str(self.home)})
         self.assertEqual(response.returncode, 0, response.stderr)
         self.assertEqual(json.loads(response.stdout)['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def _policy_file(self, models=None, filename='models.json'):
+        path = self.home / filename
+        path.write_text(json.dumps({'schema': 1, 'models': models or {'haiku': 'claude-haiku-5-5'}}))
+        path.chmod(0o600)
+        return path
+
+    @staticmethod
+    def _stage(number=1, name='stage-one', alias='haiku'):
+        return {'number': number, 'name': name, 'worker_id': f'worker-{number}',
+                'worker_model': alias, 'worker_effort': 'low', 'model_rationale': 'fixture model',
+                'inputs': ['source fixture'], 'boundaries': ['fixture output'], 'dependencies': [],
+                'definition_of_done': f'Complete {name}', 'outputs': [f'{name}.txt'],
+                'qa': {'check': f'Read {name}.txt', 'expected': 'contains completed'}}
+
+    def _strict_ready(self, stages=None):
+        policy = self._policy_file()
+        self.configure('claude', model_map=policy)
+        payload = self.payload('claude', cwd='/tmp')
+        plan = {'stages': stages or [self._stage()]}
+        payload, ledger_path, before = self._create_ready_plan('claude', payload=payload, plan=plan)
+        payload['tool_input'] = {'description': 'Original task description', 'prompt': 'original task text',
+                                 'model': 'haiku', 'subagent_type': 'general-purpose'}
+        payload['tool_use_id'] = 'tool-fixture'
+        runtime_policy = self.home / '.claude/workflow-hooks-kit/bin/delegation-guard/model-policy.json'
+        return payload, ledger_path, before, runtime_policy, policy
+
+    def test_strict_single_stage_rewrites_only_prompt_and_preserves_native_approval(self):
+        from delegation_binding import build_prompt
+        payload, ledger_path, before, runtime_policy, _policy = self._strict_ready()
+        original_input = dict(payload['tool_input'])
+        result = self.run_guard(payload, 'claude', runtime_policy)
+        self.assertNotIn('permissionDecision', result['hookSpecificOutput'])
+        rewritten = result['hookSpecificOutput']['updatedInput']
+        self.assertEqual(rewritten, {**original_input, 'description': '[workflow-stage:1] stage-one',
+                                     'prompt': build_prompt(self._stage())})
+        self.assertEqual({k: rewritten[k] for k in ('model', 'subagent_type')},
+                         {k: original_input[k] for k in ('model', 'subagent_type')})
+        self.assertIn('completion is not verified', result['systemMessage'])
+        self.assertEqual(ledger_path.read_bytes(), before)
+        receipts = self.home / '.claude/workflow-hooks-kit/delegation-receipts'
+        self.assertNotIn(b'original task text', b''.join(path.read_bytes() for path in receipts.rglob('*.json')))
+
+    def test_strict_multistage_requires_exact_selector_and_emits_selected_packet(self):
+        from delegation_binding import build_prompt
+        first, second = self._stage(1, 'first'), self._stage(2, 'second')
+        payload, _, _, runtime_policy, _ = self._strict_ready([first, second])
+        payload['tool_input']['description'] = '[workflow-stage:2] second'
+        result = self.run_guard(payload, 'claude', runtime_policy)
+        self.assertEqual(result['hookSpecificOutput']['updatedInput']['prompt'], build_prompt(second))
+        self.assertEqual(result['hookSpecificOutput']['updatedInput']['description'], '[workflow-stage:2] second')
+        payload['tool_input']['description'] = '[workflow-stage:2] second extra'
+        denied = self.run_guard(payload, 'claude', runtime_policy)
+        self.assertEqual(denied['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertIn('exactly identify', denied['hookSpecificOutput']['permissionDecisionReason'])
+
+    def test_strict_malformed_requests_policy_errors_and_unsupported_fields_deny(self):
+        payload, ledger_path, before, runtime_policy, _ = self._strict_ready()
+        cases = []
+        wrong_model = json.loads(json.dumps(payload)); wrong_model['tool_input']['model'] = 'sonnet'; cases.append(wrong_model)
+        unknown = self._policy_file({'unknown': 'claude-haiku-5-5'}, 'unknown.json')
+        specialist = json.loads(json.dumps(payload)); specialist['tool_input']['subagent_type'] = 'Explore'; cases.append(specialist)
+        extra = json.loads(json.dumps(payload)); extra['tool_input']['fallback'] = 'sonnet'; cases.append(extra)
+        long_prompt = json.loads(json.dumps(payload)); long_prompt['tool_input']['prompt'] = 'x' * 32769; cases.append(long_prompt)
+        for index, bad in enumerate(cases):
+            with self.subTest(index=index):
+                denied = self.run_guard(bad, 'claude', runtime_policy)
+                self.assertEqual(denied['hookSpecificOutput']['permissionDecision'], 'deny')
+                self.assertNotIn('updatedInput', denied['hookSpecificOutput'])
+                self.assertIn('denied the request', denied['hookSpecificOutput']['permissionDecisionReason'])
+        missing = self.run_guard(payload, 'claude', runtime_policy.with_name('missing-policy.json'))
+        self.assertEqual(missing['hookSpecificOutput']['permissionDecision'], 'deny')
+        denied_unknown = self.run_guard(payload, 'claude', unknown)
+        self.assertEqual(denied_unknown['hookSpecificOutput']['permissionDecision'], 'deny')
+        mode = runtime_policy.stat().st_mode
+        runtime_policy.chmod(0o644)
+        try:
+            denied_mode = self.run_guard(payload, 'claude', runtime_policy)
+            self.assertEqual(denied_mode['hookSpecificOutput']['permissionDecision'], 'deny')
+        finally:
+            runtime_policy.chmod(0o600)
+        symlink = runtime_policy.with_name('policy-link.json')
+        symlink.symlink_to(runtime_policy)
+        denied_link = self.run_guard(payload, 'claude', symlink)
+        self.assertEqual(denied_link['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertEqual(mode & 0o777, 0o600)
+        no_id = json.loads(json.dumps(payload)); no_id.pop('tool_use_id'); no_id['session_id'] = 'no-tool-id'
+        self.assertEqual(self.run_guard(no_id, 'claude', runtime_policy)['hookSpecificOutput']['permissionDecision'], 'deny')
+        bad_id = json.loads(json.dumps(payload)); bad_id['tool_use_id'] = 'bad\x01id'; bad_id['session_id'] = 'bad-tool-id'
+        self.assertEqual(self.run_guard(bad_id, 'claude', runtime_policy)['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_model_policy_fifo_and_duplicate_json_fail_without_blocking_or_mutation(self):
+        fifo = self.home / 'policy.fifo'
+        os.mkfifo(fifo, 0o600)
+        with self.assertRaises(ValueError):
+            self.configure('claude', model_map=fifo)
+        self.assertFalse(self.config_path('claude').exists())
+        duplicate = self.home / 'duplicate-policy.json'
+        duplicate.write_text('{"schema":1,"schema":1,"models":{"haiku":"claude-haiku-5-5"}}')
+        duplicate.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, 'Duplicate JSON'):
+            self.configure('claude', model_map=duplicate)
+        self.assertFalse(self.config_path('claude').exists())
+        payload, _, _, runtime_policy, _ = self._strict_ready()
+        fifo_denial = self.run_guard(payload, 'claude', fifo)
+        self.assertEqual(fifo_denial['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertNotIn('updatedInput', fifo_denial['hookSpecificOutput'])
+
+    def test_strict_success_receipt_binds_policy_and_canonical_binding(self):
+        from delegation_binding import validate_request
+        payload, _, before, runtime_policy, _ = self._strict_ready()
+        result = self.run_guard(payload, 'claude', runtime_policy)
+        marker = result['systemMessage'].split('[wf:', 1)[1].split(']', 1)[0]
+        state_dir = self.home / '.claude/workflow-hooks-kit/delegation-receipts'
+        runtime = self.home / '.claude/workflow-hooks-kit/bin/delegation-guard'
+        spec = importlib.util.spec_from_file_location('installed_delegation_guard', runtime / 'delegation_guard.py')
+        standalone_guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(standalone_guard)
+        ledger = json.loads(before)
+        candidate = dict(payload['tool_input'])
+        from delegation_binding import build_prompt
+        candidate['description'] = '[workflow-stage:1] stage-one'
+        candidate['prompt'] = build_prompt(self._stage())
+        binding = validate_request(ledger, candidate, {'haiku': 'claude-haiku-5-5'})
+        tool_hash = hashlib.sha256(payload['tool_use_id'].encode()).hexdigest()
+        version = standalone_guard._runtime_version(
+            self.core_dir, runtime_policy.read_bytes(), {'binding': dict(binding), 'toolUseHash': tool_hash})
+        self.assertEqual(len(version), 129)
+        self.assertRegex(version, r'^[0-9a-f]{64}:[0-9a-f]{64}$')
+        self.hook_receipt.verify(state_dir, marker, payload['session_id'], payload['prompt_id'],
+                                 'PreToolUse', version, 'success')
+        second_payload = json.loads(json.dumps(payload)); second_payload['tool_use_id'] = 'tool-fixture-2'
+        second_result = self.run_guard(second_payload, 'claude', runtime_policy)
+        second_marker = second_result['systemMessage'].split('[wf:', 1)[1].split(']', 1)[0]
+        second_hash = hashlib.sha256(second_payload['tool_use_id'].encode()).hexdigest()
+        second_version = standalone_guard._runtime_version(
+            self.core_dir, runtime_policy.read_bytes(), {'binding': dict(binding), 'toolUseHash': second_hash})
+        self.assertNotEqual(version, second_version)
+        self.hook_receipt.verify(state_dir, second_marker, payload['session_id'], payload['prompt_id'],
+                                 'PreToolUse', second_version, 'success')
+        alternate_policy = self._policy_file({'haiku': 'claude-haiku-6-0'}, 'alternate-models.json')
+        third_result = self.run_guard(payload, 'claude', alternate_policy)
+        third_marker = third_result['systemMessage'].split('[wf:', 1)[1].split(']', 1)[0]
+        alternate_binding = validate_request(ledger, candidate, {'haiku': 'claude-haiku-6-0'})
+        third_version = standalone_guard._runtime_version(
+            self.core_dir, alternate_policy.read_bytes(), {'binding': dict(alternate_binding), 'toolUseHash': tool_hash})
+        self.assertNotEqual(version, third_version)
+        self.hook_receipt.verify(state_dir, third_marker, payload['session_id'], payload['prompt_id'],
+                                 'PreToolUse', third_version, 'success')
+        revised_stage = self._stage()
+        revised_stage['definition_of_done'] = 'A revised frozen outcome'
+        revised_payload = json.loads(json.dumps(payload))
+        revised_payload['session_id'] = 'revised-stage-session'
+        _, _, revised_before = self._create_ready_plan('claude', payload=revised_payload,
+                                                       plan={'stages': [revised_stage]})
+        revised_result = self.run_guard(revised_payload, 'claude', runtime_policy)
+        revised_marker = revised_result['systemMessage'].split('[wf:', 1)[1].split(']', 1)[0]
+        revised_candidate = dict(candidate)
+        revised_candidate['prompt'] = build_prompt(revised_stage)
+        revised_binding = validate_request(json.loads(revised_before), revised_candidate,
+                                           {'haiku': 'claude-haiku-5-5'})
+        revised_version = standalone_guard._runtime_version(
+            self.core_dir, runtime_policy.read_bytes(),
+            {'binding': dict(revised_binding), 'toolUseHash': tool_hash})
+        self.assertNotEqual(version, revised_version)
+        self.hook_receipt.verify(state_dir, revised_marker, revised_payload['session_id'],
+                                 revised_payload['prompt_id'], 'PreToolUse', revised_version, 'success')
+
+    def test_strict_installer_validates_policy_refuses_codex_and_upgrades_without_losing_foreign_hooks(self):
+        policy = self._policy_file()
+        codex = self.config_path('codex')
+        codex.parent.mkdir(parents=True)
+        codex.write_text('{"permissions":{"allow":["Read"]}}')
+        before = codex.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'only by the Claude'):
+            self.configure('codex', model_map=policy)
+        self.assertEqual(codex.read_bytes(), before)
+        claude = self.config_path('claude')
+        claude.parent.mkdir(parents=True)
+        foreign = {'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': 'echo foreign'}]}]}}
+        claude.write_text(json.dumps(foreign))
+        self.configure('claude')
+        kit = self.home / '.claude/workflow-hooks-kit'
+        receipt_path = kit / 'delegation-guard-receipt.json'
+        previous_receipt = json.loads(receipt_path.read_text())
+        previous_receipt['runtime'].pop('delegation_binding.py')
+        receipt_path.write_text(json.dumps(previous_receipt))
+        (kit / 'bin/delegation-guard/delegation_binding.py').unlink()
+        self.configure('claude', model_map=policy)
+        installed = json.loads(claude.read_text())
+        self.assertEqual(installed['hooks']['UserPromptSubmit'], foreign['hooks']['UserPromptSubmit'])
+        group = next(item for item in installed['hooks']['PreToolUse'] if item.get('matcher') == 'Agent|spawn_agent')
+        command = group['hooks'][0]['command']
+        self.assertIn('--model-map', command)
+        runtime_policy = self.home / '.claude/workflow-hooks-kit/bin/delegation-guard/model-policy.json'
+        self.assertEqual(runtime_policy.read_bytes(), policy.read_bytes())
+        self.assertEqual(runtime_policy.stat().st_mode & 0o777, 0o600)
+        runtime = runtime_policy.parent
+        self.assertTrue((runtime / 'delegation_binding.py').is_file())
+        self.configure('claude')  # Idempotent strict rerun preserves the selected packet contract.
+        self.configure('claude')  # Existing strict ownership cannot be downgraded by omission.
+        self.assertIn('--model-map', next(item for item in json.loads(claude.read_text())['hooks']['PreToolUse']
+                                           if item.get('matcher') == 'Agent|spawn_agent')['hooks'][0]['command'])
+        runtime_policy.write_text('{"schema":1,"models":{"haiku":"edited"}}')
+        runtime_policy.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, 'Owned companion file changed'):
+            self.configure('claude')
+
+    def test_strict_uninstall_preserves_later_policy_edit_and_rollback_restores_upgrade(self):
+        policy = self._policy_file()
+        self.configure('claude')
+        config = self.config_path('claude')
+        config_before = config.read_bytes()
+        real_write_json = delegation_config.write_json
+        def fail_config(target, data):
+            if target == config:
+                raise OSError('injected config write failure')
+            return real_write_json(target, data)
+        with patch.object(delegation_config, 'write_json', side_effect=fail_config):
+            with self.assertRaises(OSError):
+                self.configure('claude', model_map=policy)
+        self.assertEqual(config.read_bytes(), config_before)
+        runtime = self.home / '.claude/workflow-hooks-kit/bin/delegation-guard'
+        self.assertFalse((runtime / 'model-policy.json').exists())
+        self.configure('claude', model_map=policy)
+        installed_policy = runtime / 'model-policy.json'
+        installed_policy.write_text('{"edited":true}')
+        installed_policy.chmod(0o600)
+        edited = installed_policy.read_bytes()
+        self.configure('claude', uninstall=True)
+        self.assertEqual(installed_policy.read_bytes(), edited)
+        self.assertFalse(any(group.get('matcher') == 'Agent|spawn_agent'
+                             for group in json.loads(config.read_text()).get('hooks', {}).get('PreToolUse', [])))
+
+    def test_strict_reinstall_revalidates_retained_policy_mode_before_changes(self):
+        policy = self._policy_file()
+        config = self.config_path('claude')
+        config.parent.mkdir(parents=True)
+        foreign = {'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': 'echo foreign'}]}]}}
+        config.write_text(json.dumps(foreign))
+        self.configure('claude', model_map=policy)
+        before_config = config.read_bytes()
+        receipt = self.home / '.claude/workflow-hooks-kit/delegation-guard-receipt.json'
+        before_receipt = receipt.read_bytes()
+        retained_policy = self.home / '.claude/workflow-hooks-kit/bin/delegation-guard/model-policy.json'
+        before_policy = retained_policy.read_bytes()
+        retained_policy.chmod(0o644)
+        with self.assertRaisesRegex(ValueError, 'owner-only regular file'):
+            self.configure('claude')
+        self.assertEqual(config.read_bytes(), before_config)
+        self.assertEqual(receipt.read_bytes(), before_receipt)
+        self.assertEqual(retained_policy.read_bytes(), before_policy)
+        self.assertEqual(retained_policy.stat().st_mode & 0o777, 0o644)
 
 
 if __name__ == '__main__':

@@ -19,7 +19,18 @@ sys.path.insert(0, str(ROOT))
 from install import MAX_CONFIG, bounded_json, installation_lock, read_config, safe_path, write_json  # noqa: E402
 
 SOURCE = ROOT / 'claude-plugin/workflow-hooks-kit/scripts'
-MODULES = ('delegation_gate.py', 'delegation_guard.py', 'hook_receipt.py')
+MODULES = ('delegation_gate.py', 'delegation_guard.py', 'hook_receipt.py', 'delegation_binding.py')
+MODEL_POLICY = 'model-policy.json'
+MAX_MODEL_POLICY = 8_192
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate JSON object keys are unsupported.')
+        result[key] = value
+    return result
 MATCHER = 'Agent|spawn_agent'
 EVENT = 'PreToolUse'
 RECEIPT = 'delegation-guard-receipt.json'
@@ -55,7 +66,7 @@ def _restore(path: Path, snapshot):
             os.unlink(temporary)
 
 
-def _write_bytes(path: Path, data: bytes):
+def _write_bytes(path: Path, data: bytes, mode: int = 0o700):
     safe_path(path)
     fd, temporary = tempfile.mkstemp(prefix='.delegation-', dir=path.parent)
     try:
@@ -63,7 +74,7 @@ def _write_bytes(path: Path, data: bytes):
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(temporary, 0o700)
+        os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
@@ -80,7 +91,7 @@ def _read_receipt(path: Path) -> dict:
     if not isinstance(owned, dict) or owned.get('event') != EVENT or owned.get('matcher') != MATCHER or not isinstance(owned.get('hook'), dict):
         raise ValueError('Invalid delegation guard ownership receipt.')
     for name, item in receipt['runtime'].items():
-        if name not in MODULES or not isinstance(item, dict) or not isinstance(item.get('sha256'), str) or not isinstance(item.get('created'), bool):
+        if name not in (*MODULES, MODEL_POLICY) or not isinstance(item, dict) or not isinstance(item.get('sha256'), str) or not isinstance(item.get('created'), bool):
             raise ValueError('Invalid delegation guard runtime receipt.')
     return receipt
 
@@ -109,11 +120,56 @@ def _validate_core(core_dir: Path):
         raise ValueError('Delegation is already covered by the selected core; refusing duplicate guard.')
 
 
-def _command(runtime: Path, core_dir: Path, platform: str) -> str:
+def _command(runtime: Path, core_dir: Path, platform: str, strict: bool = False) -> str:
     result = 'python3 -B ' + shlex.quote(str(runtime)) + ' --core-dir ' + shlex.quote(str(core_dir))
     if platform == 'claude':
         result += ' --claude'
+    if strict:
+        result += ' --model-map ' + shlex.quote(str(runtime.parent / MODEL_POLICY))
     return result
+
+
+def _read_model_policy(path: Path) -> bytes:
+    path = Path(path).expanduser()
+    if path.is_symlink():
+        raise ValueError('Model policy must be a regular owner-only file.')
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
+    fd = os.open(path, flags)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077 or info.st_size > MAX_MODEL_POLICY):
+            raise ValueError('Model policy must be a bounded owner-only regular file.')
+        chunks = []
+        remaining = MAX_MODEL_POLICY + 1
+        while remaining:
+            chunk = os.read(fd, min(remaining, 4096))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b''.join(chunks)
+    finally:
+        os.close(fd)
+    if len(raw) > MAX_MODEL_POLICY:
+        raise ValueError('Model policy exceeds 8 KiB.')
+    try:
+        value = json.loads(raw.decode('utf-8', 'strict'), object_pairs_hook=_unique_object)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError('Model policy must be strict UTF-8 JSON.') from exc
+    if type(value) is not dict or set(value) != {'schema', 'models'}:
+        raise ValueError('Model policy must contain exactly schema and models.')
+    if type(value['schema']) is not int or value['schema'] != 1:
+        raise ValueError('Model policy schema must be integer 1.')
+    models = value['models']
+    if type(models) is not dict or not models or len(models) > 16:
+        raise ValueError('Model policy must contain 1 to 16 aliases.')
+    for alias, native_id in models.items():
+        for label in (alias, native_id):
+            if (not isinstance(label, str) or not label or len(label) > 256
+                    or not label.isascii() or any(ch.isspace() or ord(ch) < 33 or ord(ch) == 127 for ch in label)):
+                raise ValueError('Model aliases and native IDs must be bounded printable ASCII without whitespace.')
+    return raw
 
 
 def _backup(target: Path, backup_dir: Path) -> Path:
@@ -126,9 +182,13 @@ def _backup(target: Path, backup_dir: Path) -> Path:
     return path
 
 
-def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False) -> dict:
+def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False,
+              model_map: Path | None = None) -> dict:
     if platform not in {'codex', 'claude'}:
         raise ValueError('Platform must be codex or claude.')
+    if model_map is not None and platform != 'claude':
+        raise ValueError('Strict stage packets are supported only by the Claude hook contract.')
+    policy_data = None if uninstall or model_map is None else _read_model_policy(model_map)
     home = Path(home).expanduser()
     core_dir = Path(core_dir).expanduser()
     _validate_core(core_dir)
@@ -156,6 +216,11 @@ def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False
         if not (SOURCE / name).is_file():
             raise ValueError(f'Missing companion module: {name}')
 
+    pre_receipt = _read_receipt(receipt_path)
+    if (not uninstall and model_map is None
+            and MODEL_POLICY in pre_receipt.get('runtime', {})):
+        _read_model_policy(runtime_dir / MODEL_POLICY)
+
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
     with installation_lock(base):
         for path, directory in ((target, False), (kit, True), (binaries, True), (runtime_dir, True),
@@ -174,10 +239,20 @@ def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False
         if receipt and receipt.get('platform') != platform:
             raise ValueError('Delegation guard receipt belongs to a different platform.')
         runtime_path = runtime_dir / 'delegation_guard.py'
-        expected_hook = {'type': 'command', 'command': _command(runtime_path, core_dir, platform) +
+        strict = model_map is not None or MODEL_POLICY in receipt.get('runtime', {})
+        if not uninstall and model_map is None and strict:
+            _read_model_policy(runtime_dir / MODEL_POLICY)
+        expected_hook = {'type': 'command', 'command': _command(runtime_path, core_dir, platform, strict) +
                          ' --state-dir ' + shlex.quote(str(state_dir)), 'timeout': 10}
-        if previous_owner and (previous_owner.get('hook') != expected_hook or previous_owner.get('matcher') != MATCHER):
+        upgrade_from_legacy = False
+        if previous_owner and previous_owner.get('matcher') != MATCHER:
             raise ValueError('Owned delegation command changed; preserved without replacement.')
+        if previous_owner and previous_owner.get('hook') != expected_hook:
+            legacy_hook = {'type': 'command', 'command': _command(runtime_path, core_dir, platform) +
+                           ' --state-dir ' + shlex.quote(str(state_dir)), 'timeout': 10}
+            upgrade_from_legacy = bool(model_map is not None and previous_owner.get('hook') == legacy_hook)
+            if not upgrade_from_legacy:
+                raise ValueError('Owned delegation command changed; preserved without replacement.')
         current_groups = hooks.get(EVENT, [])
         owned_group = None
         if previous_owner:
@@ -201,6 +276,9 @@ def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False
         runtime_receipt = dict(receipt.get('runtime', {}))
         runtime_snapshots = {}
         module_data = {name: (SOURCE / name).read_bytes() for name in MODULES}
+        if policy_data is not None:
+            module_data[MODEL_POLICY] = policy_data
+        managed_modules = tuple(dict.fromkeys((*MODULES, *receipt.get('runtime', {}), *module_data)))
         created_dirs = []
         backup_paths = []
         if not binaries.exists() and not uninstall:
@@ -224,10 +302,18 @@ def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False
 
         config_snapshot = _snapshot(target)
         receipt_snapshot = _snapshot(receipt_path)
-        for name in MODULES:
+        for name in managed_modules:
             runtime = runtime_dir / name
             runtime_snapshots[runtime] = _snapshot(runtime)
         try:
+            if not uninstall:
+                for name, owner in runtime_receipt.items():
+                    if name in module_data:
+                        continue
+                    runtime = runtime_dir / name
+                    safe_path(runtime)
+                    if (not runtime.is_file() or _sha256(runtime.read_bytes()) != owner['sha256']):
+                        raise ValueError(f'Owned companion file changed; preserved without replacement: {name}')
             if uninstall:
                 if previous_owner:
                     new_groups = []
@@ -250,7 +336,14 @@ def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False
             else:
                 if not previous_owner:
                     groups.append({'matcher': MATCHER, 'hooks': [expected_hook]})
-                for name in MODULES:
+                elif upgrade_from_legacy:
+                    matches = [group for group in groups if group.get('matcher') == MATCHER
+                               and previous_owner['hook'] in group['hooks']]
+                    if len(matches) != 1:
+                        raise ValueError('Owned delegation handler changed during strict upgrade.')
+                    hooks_list = matches[0]['hooks']
+                    hooks_list[hooks_list.index(previous_owner['hook'])] = expected_hook
+                for name in module_data:
                     runtime = runtime_dir / name
                     source_bytes = module_data[name]
                     source_hash = _sha256(source_bytes)
@@ -266,10 +359,10 @@ def configure(home: Path, platform: str, core_dir: Path, uninstall: bool = False
                                 stream.write(runtime.read_bytes())
                             os.chmod(backup, 0o600)
                             backup_paths.append(backup)
-                            _write_bytes(runtime, source_bytes)
+                            _write_bytes(runtime, source_bytes, 0o600 if name == MODEL_POLICY else 0o700)
                             created = True
                     else:
-                        _write_bytes(runtime, source_bytes)
+                        _write_bytes(runtime, source_bytes, 0o600 if name == MODEL_POLICY else 0o700)
                         created = True
                     runtime_receipt[name] = {'sha256': source_hash, 'created': created}
 
@@ -320,9 +413,10 @@ def main(argv=None) -> int:
     parser.add_argument('--core-dir', type=Path, required=True, help='Trusted installed legacy core directory.')
     parser.add_argument('--home', type=Path, default=Path.home(), help='Alternate home for fixtures.')
     parser.add_argument('--uninstall', action='store_true')
+    parser.add_argument('--model-map', type=Path, help='Trusted Claude alias-to-native-model JSON policy.')
     args = parser.parse_args(argv)
     try:
-        result = configure(args.home, args.platform, args.core_dir, args.uninstall)
+        result = configure(args.home, args.platform, args.core_dir, args.uninstall, args.model_map)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (OSError, ValueError) as exc:

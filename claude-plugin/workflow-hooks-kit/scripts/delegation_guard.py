@@ -8,10 +8,63 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import stat
 import sys
 
 MAX_INPUT = 1_000_000
+MAX_MODEL_POLICY = 8_192
+MAX_ORIGINAL_PROMPT = 32_768
 DELEGATION_TOOLS = {"Agent", "spawn_agent"}
+MODEL_ALIAS = re.compile(r"^\[workflow-stage:([1-9][0-9]*)\] ")
+
+
+def _read_model_policy(path):
+    path = Path(path)
+    if path.is_symlink():
+        raise ValueError("Model policy must be a regular owner-only file.")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("Model policy is missing, unreadable, or unsafe.") from exc
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) & 0o077 or info.st_size > MAX_MODEL_POLICY):
+            raise ValueError("Model policy must be a bounded owner-only regular file.")
+        chunks = []
+        remaining = MAX_MODEL_POLICY + 1
+        while remaining:
+            chunk = os.read(fd, min(remaining, 4096))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) > MAX_MODEL_POLICY:
+            raise ValueError("Model policy exceeds 8 KiB.")
+        try:
+            policy = json.loads(raw.decode("utf-8", "strict"), object_pairs_hook=_unique_object)
+        except UnicodeError as exc:
+            raise ValueError("Model policy is not valid UTF-8.") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError("Model policy is not valid JSON.") from exc
+    finally:
+        os.close(fd)
+    if type(policy) is not dict or set(policy) != {"schema", "models"}:
+        raise ValueError("Model policy must contain exactly schema and models.")
+    if type(policy["schema"]) is not int or policy["schema"] != 1:
+        raise ValueError("Model policy schema must be integer 1.")
+    models = policy["models"]
+    if type(models) is not dict or not models or len(models) > 16:
+        raise ValueError("Model policy must contain 1 to 16 aliases.")
+    for alias, model_id in models.items():
+        for label in (alias, model_id):
+            if (not isinstance(label, str) or not label or len(label) > 256
+                    or not label.isascii() or any(ch.isspace() or ord(ch) < 33 or ord(ch) == 127 for ch in label)):
+                raise ValueError("Model aliases and native IDs must be bounded printable ASCII without whitespace.")
+    return policy, raw
 
 
 def _tool_name(payload):
@@ -29,6 +82,15 @@ def _deny(message):
                                    "permissionDecisionReason": message[:300]}}
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON object keys are unsupported.")
+        result[key] = value
+    return result
+
+
 def _native_ids(payload):
     session = payload.get("session_id")
     turn = payload.get("turn_id") or payload.get("prompt_id")
@@ -37,17 +99,36 @@ def _native_ids(payload):
             and not any(ord(c) < 32 or ord(c) == 127 for c in session + turn))
 
 
-def _runtime_version(core_dir: Path):
+def _runtime_version(core_dir: Path, model_policy=None, binding=None):
     script_dir = Path(__file__).absolute().parent
     paths = [script_dir / "delegation_guard.py", script_dir / "delegation_gate.py",
              script_dir / "hook_receipt.py", core_dir / "tool_scope_hook.py",
              core_dir / "session_workflow_hook.py"]
+    if model_policy is not None:
+        paths.append(script_dir / "delegation_binding.py")
     digest = hashlib.sha256()
+    components = []
     for path in paths:
         if path.is_symlink() or not path.is_file():
             raise ValueError("Runtime component is missing or unsafe.")
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
+        content = path.read_bytes()
+        components.append((path, content))
+        digest.update(content)
+    if model_policy is None:
+        return digest.hexdigest()
+    strict_digest = hashlib.sha256()
+    for path, content in components:
+        name = path.name.encode("utf-8")
+        strict_digest.update(len(name).to_bytes(4, "big"))
+        strict_digest.update(name)
+        strict_digest.update(len(content).to_bytes(8, "big"))
+        strict_digest.update(content)
+    strict_digest.update(b"model-policy.json\0")
+    strict_digest.update(len(model_policy).to_bytes(8, "big"))
+    strict_digest.update(model_policy)
+    binding_bytes = json.dumps(dict(binding), ensure_ascii=False, allow_nan=False,
+                               sort_keys=True, separators=(",", ":")).encode("utf-8", "strict")
+    return strict_digest.hexdigest() + ":" + hashlib.sha256(binding_bytes).hexdigest()
 
 
 def _with_marker(result, marker):
@@ -60,7 +141,58 @@ def _with_marker(result, marker):
         detail["permissionDecisionReason"] = (reason[:max(0, 300 - len(marker_text) - 1)] + " " + marker_text)[:300]
         output["hookSpecificOutput"] = detail
         return output
-    return {"systemMessage": f"Delegation prerequisite gate evaluated; worker completion is not verified. {marker_text}"}
+    message = f"Delegation prerequisite gate evaluated; worker completion is not verified. {marker_text}"
+    if isinstance(result, dict) and result:
+        output = dict(result)
+        existing = output.get("systemMessage")
+        output["systemMessage"] = (str(existing) + " " + message).strip() if existing else message
+        return output
+    return {"systemMessage": message}
+
+
+def _strict_input(ledger, tool_input, models):
+    if type(tool_input) is not dict or set(tool_input) != {"description", "prompt", "model", "subagent_type"}:
+        raise ValueError("Agent request fields do not match the supported native schema.")
+    description, original_prompt = tool_input["description"], tool_input["prompt"]
+    if not isinstance(description, str) or not description.strip() or len(description.encode("utf-8", "strict")) > 512:
+        raise ValueError("Agent description must be bounded valid UTF-8 text.")
+    if not isinstance(original_prompt, str) or len(original_prompt.encode("utf-8", "strict")) > MAX_ORIGINAL_PROMPT:
+        raise ValueError("Original Agent prompt must be bounded valid UTF-8 text.")
+    stages = ledger.get("stages")
+    if type(stages) is not list or not stages or len(stages) > 20:
+        raise ValueError("Ledger stages are missing or unsupported.")
+    if len(stages) == 1:
+        number = 1
+        stage = stages[0]
+    else:
+        match = MODEL_ALIAS.match(description)
+        if match is None:
+            raise ValueError("Multi-stage description must select an exact workflow stage.")
+        number = int(match.group(1))
+        if number > len(stages):
+            raise ValueError("Description selects a stage absent from this ledger.")
+        stage = stages[number - 1]
+        if description != f"[workflow-stage:{number}] {stage.get('name')}":
+            raise ValueError("Description must exactly identify the selected frozen stage.")
+    if type(stage) is not dict or type(stage.get("number")) is not int or stage.get("number") != number:
+        raise ValueError("Selected frozen stage is malformed.")
+    alias = tool_input["model"]
+    if not isinstance(alias, str) or alias != stage.get("worker_model") or alias not in models:
+        raise ValueError("Requested model must exactly match the selected stage and trusted alias policy.")
+    from delegation_binding import build_prompt, validate_request
+    candidate = dict(tool_input)
+    candidate["description"] = f"[workflow-stage:{number}] {stage['name']}"
+    candidate["prompt"] = build_prompt(stage)
+    binding = validate_request(ledger, candidate, models)
+    return candidate, binding
+
+
+def _strict_tool_hash(payload):
+    tool_use_id = payload.get("tool_use_id")
+    if (not isinstance(tool_use_id, str) or not tool_use_id.strip() or len(tool_use_id) > 256
+            or any(ord(char) < 32 or ord(char) == 127 for char in tool_use_id)):
+        raise ValueError("Claude tool_use_id is missing or invalid.")
+    return hashlib.sha256(tool_use_id.encode("utf-8", "strict")).hexdigest()
 
 
 def _load_core(core_dir: Path):
@@ -87,7 +219,7 @@ def _load_core(core_dir: Path):
             pass
 
 
-def run(payload, core_dir=None, claude=False, state_dir=None):
+def run(payload, core_dir=None, claude=False, state_dir=None, model_map=None):
     if not isinstance(payload, dict) or not _is_delegation(payload):
         return {}
     if claude:
@@ -112,12 +244,26 @@ def run(payload, core_dir=None, claude=False, state_dir=None):
         gate_result = delegation_gate.check(core, payload, state)
         if not isinstance(state_dir, (str, Path)) or not str(state_dir).strip():
             raise ValueError("Owner-only receipt state directory is required.")
-        version = _runtime_version(Path(core_dir).expanduser())
         denied = (isinstance(gate_result, dict) and isinstance(gate_result.get("hookSpecificOutput"), dict)
                   and gate_result["hookSpecificOutput"].get("permissionDecision") == "deny")
         if gate_result != {} and not denied:
             gate_result = _deny("Delegation prerequisite gate returned an invalid result; dispatch denied.")
             denied = True
+        policy_raw = None
+        binding = None
+        if model_map is not None:
+            if not claude:
+                raise ValueError("Strict stage packets are supported only by the Claude hook contract.")
+            policy, policy_raw = _read_model_policy(model_map)
+            if gate_result == {}:
+                _ledger_path, ledger = core._load_existing(payload, state)
+                if not isinstance(ledger, dict):
+                    raise ValueError("Matching active workflow ledger could not be reloaded.")
+                candidate, binding = _strict_input(ledger, payload.get("tool_input"), policy["models"])
+                binding = {"binding": dict(binding), "toolUseHash": _strict_tool_hash(payload)}
+                gate_result = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": candidate},
+                               "systemMessage": "Strict frozen-stage packet emitted; dispatch and worker completion are unverified."}
+        version = _runtime_version(Path(core_dir).expanduser(), policy_raw, binding) if binding is not None else _runtime_version(Path(core_dir).expanduser())
         identity = {"event": "PreToolUse", "session_id": payload["session_id"]}
         if payload.get("turn_id"):
             identity["turn_id"] = payload["turn_id"]
@@ -125,6 +271,8 @@ def run(payload, core_dir=None, claude=False, state_dir=None):
             identity["prompt_id"] = payload["prompt_id"]
         marker, _receipt = hook_receipt.create(state_dir, identity, "failure" if denied else "success", version)
         return _with_marker(gate_result, marker)
+    except ValueError as exc:
+        return _deny(f"Strict delegation validation denied the request: {exc}")
     except Exception as exc:
         return _deny(f"Delegation guard unavailable: {type(exc).__name__}; repair trusted core/task state before retrying.")
 
@@ -153,10 +301,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--core-dir")
     parser.add_argument("--state-dir")
+    parser.add_argument("--model-map")
     parser.add_argument("--claude", action="store_true")
     try:
         args, _ = parser.parse_known_args(argv)
-        result = run(payload, args.core_dir, args.claude, args.state_dir)
+        result = run(payload, args.core_dir, args.claude, args.state_dir, args.model_map)
     except Exception as exc:
         result = _deny(f"Delegation guard unavailable: {type(exc).__name__}; repair trusted core/task state before retrying.")
     print(json.dumps(result, ensure_ascii=False))
