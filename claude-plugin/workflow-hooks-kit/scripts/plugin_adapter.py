@@ -23,13 +23,15 @@ def global_adapter_active(home: Path) -> bool:
             matcher = MATCHER if event in {'PreToolUse', 'PostToolUse'} else None
             if not any(group.get('matcher') == matcher and any(h.get('command') == expected for h in group.get('hooks', [])) for group in data.get('hooks', {}).get(event, [])):
                 return False
-        return all((script.parent / name).read_bytes() == (ROOT / 'scripts' / name).read_bytes() for name in ('tool_scope_hook.py', 'session_workflow_hook.py'))
+        runtime_sources = ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py')
+        return all((script.parent / name).read_bytes() == (ROOT / 'scripts' / name).read_bytes()
+                   for name in runtime_sources)
     except (OSError, ValueError, TypeError, AttributeError):
         return False
 
 
-def run(payload: dict) -> dict:
-    if global_adapter_active(Path.home()) or payload.get('hook_event_name') == 'SessionStart':
+def _run(payload: dict, deduplicated: bool) -> dict:
+    if deduplicated:
         return {}
     result = core.run(payload, claude=True)
     if payload.get('hook_event_name') == 'UserPromptSubmit':
@@ -41,13 +43,49 @@ def run(payload: dict) -> dict:
     return result
 
 
+def run(payload: dict) -> dict:
+    deduplicated = payload.get('hook_event_name') == 'SessionStart' or global_adapter_active(Path.home())
+    return _run(payload, deduplicated)
+
+
 def main() -> None:
+    payload = None
+    deduplicated = None
+    handler_failed = False
     try:
         raw = sys.stdin.buffer.read(core.MAX_INPUT + 1)
         payload = json.loads(raw) if len(raw) <= core.MAX_INPUT else None
-        result = run(payload) if isinstance(payload, dict) else {}
+        if isinstance(payload, dict):
+            deduplicated = payload.get('hook_event_name') == 'SessionStart' or global_adapter_active(Path.home())
+            result = _run(payload, deduplicated)
+        else:
+            result = {}
     except Exception as exc:
+        handler_failed = True
         result = {'systemMessage': f'Workflow plugin input error (fail-open): {type(exc).__name__}.'}
+    if isinstance(payload, dict):
+        event, tool = core._event(payload), core._tool_name(payload)
+        receipt_state = core.CLAUDE_STATE / 'hook-receipts' / 'plugin-adapter'
+        components = (
+            Path(__file__), Path(core.__file__), Path(core.workflow.__file__),
+        )
+        try:
+            import native_receipt
+            components += (Path(__file__).with_name('hook_receipt.py'), Path(native_receipt.__file__))
+            version = native_receipt.handler_version('claude-plugin-adapter-v1', components)
+            if deduplicated:
+                outcome = 'skipped'
+            elif handler_failed:
+                outcome = 'failure'
+            else:
+                outcome = native_receipt.outcome_for(result)
+            native_receipt.create_native(receipt_state, payload, outcome, version)
+        except Exception as exc:
+            sys.stderr.write(f'Native hook receipt unavailable: {type(exc).__name__}.\n')
+            denied = (isinstance(result, dict) and isinstance(result.get('hookSpecificOutput'), dict)
+                      and result['hookSpecificOutput'].get('permissionDecision') == 'deny')
+            if event == 'PreToolUse' and tool in core.EDIT_TOOLS | {'Bash'} and not denied:
+                result = core._deny('PreToolUse', f'Hook receipt unavailable: {type(exc).__name__}; operation denied.')
     print(json.dumps(result, ensure_ascii=False))
 
 

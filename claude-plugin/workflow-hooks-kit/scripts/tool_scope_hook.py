@@ -942,6 +942,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--claude", action="store_true")
     args, _ = parser.parse_known_args(argv)
+    payload = None
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT + 1)
         if len(raw) > MAX_INPUT:
@@ -951,6 +952,25 @@ def main(argv: list[str] | None = None) -> int:
             result = run(payload, claude=args.claude) if isinstance(payload, dict) else {}
     except Exception as exc:
         result = {"systemMessage": f"Tool scope hook input error (fail-open): {type(exc).__name__}: {exc}"}
+    if isinstance(payload, dict):
+        event, tool = _event(payload), _tool_name(payload)
+        receipt_root = CLAUDE_STATE if args.claude else workflow.STATE.parent
+        receipt_state = receipt_root / "hook-receipts" / "tool-scope"
+        try:
+            import native_receipt
+            components = (
+                Path(__file__), Path(workflow.__file__), Path(__file__).with_name("hook_receipt.py"),
+                Path(native_receipt.__file__),
+            )
+            handler = "tool-scope-claude-v1" if args.claude else "tool-scope-codex-v1"
+            version = native_receipt.handler_version(handler, components)
+            native_receipt.create_native(receipt_state, payload, native_receipt.outcome_for(result), version)
+        except Exception as exc:
+            sys.stderr.write(f"Native hook receipt unavailable: {type(exc).__name__}.\n")
+            denied = (isinstance(result, dict) and isinstance(result.get("hookSpecificOutput"), dict)
+                      and result["hookSpecificOutput"].get("permissionDecision") == "deny")
+            if event == "PreToolUse" and tool in EDIT_TOOLS | {"Bash"} and not denied:
+                result = _deny("PreToolUse", f"Hook receipt unavailable: {type(exc).__name__}; operation denied.")
     sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
     return 0
 

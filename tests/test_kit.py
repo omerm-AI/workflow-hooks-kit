@@ -294,12 +294,22 @@ class InstallerTests(HomeFixture):
                 installer.operate(self.home, 'codex')
         self.assertEqual(path.read_text(), '{"unchanged": true}')
 
-    def test_plugin_dedup_uses_installer_command_and_core_bytes(self):
+    def test_plugin_dedup_requires_installer_command_and_all_runtime_source_bytes(self):
         installer.operate(self.home, 'claude')
         self.assertTrue(plugin_adapter.global_adapter_active(self.home))
         script = self.home/'.claude/workflow-hooks-kit/bin/tool_scope_hook.py'
-        script.write_text(script.read_text()+'\n# changed fixture\n')
-        self.assertFalse(plugin_adapter.global_adapter_active(self.home))
+        runtime = script.parent
+        for name in ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py'):
+            with self.subTest(source=name):
+                path = runtime / name
+                original = path.read_bytes()
+                path.write_bytes(original + b'\n# changed fixture\n')
+                self.assertFalse(plugin_adapter.global_adapter_active(self.home))
+                path.write_bytes(original)
+                self.assertTrue(plugin_adapter.global_adapter_active(self.home))
+                path.unlink()
+                self.assertFalse(plugin_adapter.global_adapter_active(self.home))
+                path.write_bytes(original)
 
     def test_real_cli_and_installed_learning(self):
         args = [sys.executable, '-B', str(ROOT/'install.py'), '--platform', 'both', '--home', str(self.home)]
