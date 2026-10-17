@@ -17,7 +17,8 @@ import os
 
 EVENTS = ('UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop')
 SOURCE = Path(__file__).resolve().parent / 'claude-plugin/workflow-hooks-kit'
-MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit'
+MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'
+LEGACY_MATCHERS = {'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit'}
 LEARNING = Path(__file__).resolve().parent / 'learning'
 MAX_CONFIG = 4_000_000
 
@@ -69,7 +70,7 @@ def read_config(path: Path) -> dict:
 def read_receipt(path: Path) -> dict:
     data = bounded_json(path, 64_000)
     owned = data.get('owned', {})
-    if not isinstance(owned, dict) or any(event not in EVENTS or not isinstance(value, dict) or not isinstance(value.get('hook'), dict) or value.get('matcher') not in (None, MATCHER) for event, value in owned.items()):
+    if not isinstance(owned, dict) or any(event not in EVENTS or not isinstance(value, dict) or not isinstance(value.get('hook'), dict) or value.get('matcher') not in (None, MATCHER, *LEGACY_MATCHERS) for event, value in owned.items()):
         raise ValueError('Invalid installer ownership receipt.')
     return data
 
@@ -260,7 +261,7 @@ def _operate_locked(home, platform, uninstall, target, kit, mcp=None):
         exact = expected['hooks'][0]
         current = hooks.get(event, [])
         owner = owned.get(event)
-        if owner and (owner['hook'] != exact or owner.get('matcher') != expected.get('matcher')):
+        if owner and (owner['hook'] != exact or owner.get('matcher') not in (expected.get('matcher'), *LEGACY_MATCHERS)):
             raise ValueError('Receipt does not describe this installer command and matcher.')
         groups = []
         removed = False

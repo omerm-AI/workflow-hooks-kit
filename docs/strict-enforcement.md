@@ -1,6 +1,8 @@
 # Strict enforcement: contract and current gaps
 
-**Not implemented as a universal guarantee.** This document defines acceptance targets, not a new runtime feature or a successful deployment. The existing kit cannot prove mandatory model selection, actual worker dispatch, or independent review from caller-supplied ledger fields.
+**Not implemented as a universal guarantee.** The local kit now implements a prerequisite gate for native `Agent` and `spawn_agent` calls: a protected native task identity and frozen READY substantial plan are required. This gate does not prove actual worker dispatch, model identity, completion, or independent review, and local tests do not prove native hook activation.
+
+Deployment proceeds in this order: (1) Codex and Claude Code gates plus native acceptance, (2) ordinary GPT capability assessment and implementation where supported, then (3) Cowork. Evidence from the first phase does not certify later phases.
 
 ## Required control flow
 
@@ -45,6 +47,14 @@ Absent activation, identity, required evidence, or interception must yield **blo
 8. Disabled/untrusted hooks, missing identity, unsupported tools or remote writes: report unavailable, not certified enforcement.
 
 Run these against the installed native host, not only replay payloads. Test stale receipts, cross-session reuse, replayed completions, concurrent agents, changed artifacts and changed acceptance criteria as additional cases. Validate that normal conversation adds no unnecessary model calls or automatic continuations.
+
+## Hook-origin acceptance
+
+Native acceptance must isolate executable hooks from matching model instructions. In a disposable test scope, remove the tested work instruction from the prompt, project instructions, skills and memory where the host permits isolation. Preserve unrelated safety and permission controls. Use the same neutral test request with the hook disabled and enabled, in fresh equivalent sessions, and retain the different observed outcomes. Do not weaken the production installation for this control.
+
+Each tested hook invocation must produce a unique local receipt bound to the native session/turn, event, hook version and observed result. A short matching marker in hook output is diagnostic, not sufficient proof. Validate it against the independently inspected local receipt and actual host event; reject missing, replayed, stale or mismatched receipts. Do not supply the expected marker in the test prompt or accept a model-authored receipt as provenance. Local replay alone cannot establish a native event, and a local signature cannot authenticate host origin against another process running with the same permissions.
+
+If the host cannot exclude a relevant instruction source, report the causal test as unverified. Language instruction loading and actual Hebrew output are separate acceptance checks. This receipt and native A/B protocol is a required next implementation step, not a capability delivered by the prerequisite gate above.
 
 ## Deployment boundary
 

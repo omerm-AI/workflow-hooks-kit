@@ -52,6 +52,100 @@ class HomeFixture(unittest.TestCase):
 
 
 class RuntimeTests(HomeFixture):
+    def delegate(self, **extra):
+        return self.event('PreToolUse', 'Agent', {'description': 'delegate'}, **extra)
+
+    def substantial_plan(self):
+        return {'stages': [{
+            'number': 1, 'name': 'implementation', 'worker_id': 'worker-1',
+            'worker_model': 'declared-model', 'worker_effort': 'low',
+            'model_rationale': 'adequate for bounded implementation',
+            'inputs': ['request'], 'boundaries': ['listed files'], 'dependencies': [],
+            'definition_of_done': 'Implement the scoped change', 'outputs': ['result.txt'],
+            'qa': {'check': 'Read result.txt', 'expected': 'contains result'}
+        }]}
+
+    def test_native_delegation_requires_substantial_plan(self):
+        for tool_name in ('Agent', 'spawn_agent'):
+            with self.subTest(tool_name=tool_name):
+                result = core.run(self.event('PreToolUse', tool_name, {'description': 'delegate'}))
+                self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        ledger = workflow._read(workflow._ledger_path('fixture-session', 'fixture-turn'))
+        self.assertEqual(ledger['task_kind'], 'substantial')
+        self.assertIn('stages', self.reason(result))
+
+    def test_native_delegation_rejects_missing_identity(self):
+        result = core.run(self.delegate(session_id=''))
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_native_delegation_rejects_compact_plan(self):
+        self.sentinel('plan', {'definition_of_done': 'Do work', 'outputs': ['x'], 'qa': {'check': 'Read', 'expected': 'text'}})
+        result = core.run(self.delegate())
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertIn('substantial', self.reason(result).lower())
+
+    def test_native_delegation_accepts_ready_substantial_plan(self):
+        self.sentinel('plan', self.substantial_plan())
+        self.assertEqual(core.run(self.delegate()), {})
+
+    def test_native_delegation_rejects_terminal_and_blocked_plans(self):
+        self.sentinel('plan', self.substantial_plan())
+        path = workflow._ledger_path('fixture-session', 'fixture-turn')
+        for state in ('complete', 'blocked'):
+            ledger = workflow._read(path)
+            ledger['state'] = state
+            core._atomic_write(path, ledger)
+            result = core.run(self.delegate())
+            self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_native_delegation_rejects_damaged_substantial_schemas(self):
+        self.sentinel('plan', self.substantial_plan())
+        path = workflow._ledger_path('fixture-session', 'fixture-turn')
+        baseline = workflow._read(path)
+        for damage in ('missing_worker', 'duplicate_number', 'duplicate_name', 'unsupported_schema', 'boolean_schema', 'float_schema'):
+            with self.subTest(damage=damage):
+                ledger = json.loads(json.dumps(baseline))
+                if damage == 'missing_worker':
+                    del ledger['stages'][0]['worker_model']
+                elif damage == 'duplicate_number':
+                    stage = dict(ledger['stages'][0])
+                    stage['name'] = 'implementation-2'
+                    ledger['stages'].append(stage)
+                elif damage == 'duplicate_name':
+                    stage = dict(ledger['stages'][0])
+                    stage['number'] = 2
+                    ledger['stages'].append(stage)
+                elif damage == 'unsupported_schema':
+                    ledger['schema_version'] = 2
+                elif damage == 'boolean_schema':
+                    ledger['schema_version'] = True
+                else:
+                    ledger['schema_version'] = 1.0
+                core._atomic_write(path, ledger)
+                result = core.run(self.delegate())
+                self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+                core._atomic_write(path, baseline)
+
+    def test_claude_native_prompt_id_adapts_for_delegation(self):
+        payload = {'hook_event_name': 'PreToolUse', 'session_id': 'claude-session', 'prompt_id': 'claude-prompt',
+                   'cwd': str(self.project), 'tool_name': 'Agent', 'tool_input': {}}
+        result = core.run(payload, claude=True)
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertTrue(core.CLAUDE_STATE.exists())
+
+    def test_native_delegation_corrupt_state_denies_compactly(self):
+        path, _ = core._ensure_ledger(self.delegate(), workflow.STATE, str(self.project), 'substantial')
+        path.write_text('{broken')
+        result = core.run(self.delegate())
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertLessEqual(len(self.reason(result)), 300)
+
+    def test_native_delegation_handler_exception_denies(self):
+        with patch.object(core, '_protected_scope', side_effect=RuntimeError('fixture failure')):
+            result = core.run(self.delegate())
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertLessEqual(len(self.reason(result)), 300)
+
     def test_plan_scope_stop_and_qa(self):
         write = self.event('PreToolUse', 'Write', {'file_path': str(self.project / 'notes.txt'), 'content': 'checked'})
         self.assertEqual(core.run(write)['hookSpecificOutput']['permissionDecision'], 'deny')
@@ -121,6 +215,32 @@ class InstallerTests(HomeFixture):
             self.assertEqual(after['hooks']['Stop'][0]['hooks'][0]['timeout'], 42)
             self.assertNotIn('PreToolUse', after['hooks'])
             self.assertTrue(any((path.parent/'workflow-hooks-kit/backups').glob('*'+path.name)))
+
+    def test_delegation_matcher_is_installed_idempotently(self):
+        installer.operate(self.home, 'claude')
+        installer.operate(self.home, 'claude')
+        data = json.loads(self.config('claude').read_text())
+        group = data['hooks']['PreToolUse'][0]
+        self.assertEqual(group['matcher'], installer.MATCHER)
+        self.assertIn('Agent', group['matcher'])
+        self.assertIn('spawn_agent', group['matcher'])
+        self.assertEqual(len(data['hooks']['PreToolUse']), 1)
+
+    def test_legacy_owned_matcher_migrates_without_duplicate_groups(self):
+        installer.operate(self.home, 'claude')
+        legacy = next(iter(installer.LEGACY_MATCHERS))
+        config = self.config('claude')
+        data = json.loads(config.read_text())
+        data['hooks']['PreToolUse'][0]['matcher'] = legacy
+        config.write_text(json.dumps(data))
+        receipt = self.home/'.claude/workflow-hooks-kit/install-receipt.json'
+        owned = json.loads(receipt.read_text())
+        owned['owned']['PreToolUse']['matcher'] = legacy
+        receipt.write_text(json.dumps(owned))
+        installer.operate(self.home, 'claude')
+        updated = json.loads(config.read_text())['hooks']['PreToolUse']
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0]['matcher'], installer.MATCHER)
 
     def test_original_exact_hooks_are_not_claimed(self):
         path = self.config('codex')

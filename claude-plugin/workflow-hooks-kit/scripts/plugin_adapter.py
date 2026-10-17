@@ -9,7 +9,7 @@ import tool_scope_hook as core
 
 EVENTS = {'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'}
 ROOT = Path(__file__).resolve().parent.parent
-MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit'
+MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'
 
 
 def global_adapter_active(home: Path) -> bool:

@@ -31,7 +31,7 @@
             "timeout": 10
           }
         ],
-        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
+        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent"
       }
     ],
     "PostToolUse": [
@@ -43,7 +43,7 @@
             "timeout": 10
           }
         ],
-        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
+        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent"
       }
     ],
     "Stop": [
