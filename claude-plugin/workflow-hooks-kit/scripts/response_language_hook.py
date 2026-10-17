@@ -28,6 +28,7 @@ DIRECTIVES = {
 EVENTS = {'UserPromptSubmit', 'SessionStart'}
 IDENTITY_FIELDS = ('session_id', 'turn_id', 'prompt_id')
 RECEIPT_UNAVAILABLE = 'Response-language receipt unavailable; directive emitted without receipt.'
+SKIPPED_RECEIPT_UNAVAILABLE = 'Cached response-language receipt unavailable; no language context emitted.'
 
 
 def _digest(value: bytes) -> str:
@@ -262,8 +263,11 @@ def main() -> int:
                         cached, writable = _read_session_cache(directory, session, args.language, version)
                         if cached:
                             # The prior local emission is cached; this receipt records suppression only.
-                            _create_receipt(args.state_dir, event, payload, 'skipped')
-                            print('{}')
+                            skipped_marker = _create_receipt(args.state_dir, event, payload, 'skipped')
+                            if skipped_marker:
+                                print('{}')
+                            else:
+                                print(json.dumps({'systemMessage': SKIPPED_RECEIPT_UNAVAILABLE}))
                             return 0
                         marker = _create_receipt(args.state_dir, event, payload, 'success')
                         if marker and writable:

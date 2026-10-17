@@ -43,7 +43,7 @@ Ten mechanisms are explained in [coverage](docs/coverage.md). Hooks validate loc
 
 ## Optional event evidence and language
 
-[Local signed receipts](docs/hook-receipts.md) bind a one-use marker to hashed event identities, time and installed runtime version. They do not authenticate native origin by themselves. [The optional response-language hook](docs/response-language.md) includes a controlled native Code Local enabled/disabled sample with matching static instructions excluded. That sample does not establish every future response, Cowork, Codex or ordinary GPT behavior. Install language support explicitly with `python3 tools/configure_language.py --language he` (or `en`); it adds bounded context even to conversation. The base installer does not enable this optional hook.
+[Local signed receipts](docs/hook-receipts.md) bind a one-use marker to hashed event identities, time and installed runtime version. They do not authenticate native origin by themselves. [The optional response-language hook](docs/response-language.md) includes a controlled native Code Local enabled/disabled sample with matching static instructions excluded. That sample does not establish every future response, Cowork, Codex or ordinary GPT behavior. Install language support explicitly with `python3 tools/configure_language.py --language he` (or `en`); it adds bounded bootstrap context, then no language context on cached prompts. The base installer does not enable this optional hook.
 
 [The native Agent observer](docs/delegation-observer.md) records bounded requested/resolved model metadata with a signed data-bound marker. Its controlled Code Local pilot observed an actual worker, but does not enforce model selection or certify parent QA. It is not automatically registered by the base installer.
 
@@ -60,3 +60,5 @@ python3 -B -m unittest discover -s tests -v
 ```
 
 Tests use temporary homes under your home directory (the core intentionally rejects `/tmp` as a project root), preserve unrelated settings, and never touch live host configuration. For learning tests, run the documented command in that module. No binary artifact needs to be tracked in Git.
+
+[The stage request validator](docs/delegation-binding.md) mechanically binds a canonical DoD packet and requested model to a frozen stage. It is not yet connected to a native enforcement handler. A separate native input-rewrite sample establishes a possible delivery path, without certifying full routing or QA enforcement.

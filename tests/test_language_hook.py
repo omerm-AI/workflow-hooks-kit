@@ -70,6 +70,37 @@ class LanguageHookTests(unittest.TestCase):
                                      'he', '--state-dir', str(state))
             self._assert_has_marker(resumed)
 
+    def test_skipped_receipt_failure_is_reported_without_context_and_retries(self):
+        with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
+            state = Path(directory) / 'state'
+            self._assert_has_marker(self.run_hook(json.dumps({
+                'hook_event_name': 'SessionStart', 'session_id': 'receipt-retry',
+            }), 'he', '--state-dir', str(state)))
+            cache_path = next(state.glob('language-session-*.json'))
+            cache_before = cache_path.read_bytes()
+            key_path = state / '.hook-receipt.key'
+            os.chmod(key_path, 0o644)
+            failed = self.run_hook(json.dumps({
+                'hook_event_name': 'UserPromptSubmit', 'session_id': 'receipt-retry',
+                'prompt_id': 'failed-receipt', 'prompt': 'Hello',
+            }), 'he', '--state-dir', str(state))
+            self.assertIn('systemMessage', failed)
+            self.assertIn('cached response-language receipt unavailable', failed['systemMessage'].lower())
+            self.assertNotIn('hookSpecificOutput', failed)
+            self.assertNotRegex(json.dumps(failed), r'\[wf:[^]]+\]')
+            self.assertEqual(cache_path.read_bytes(), cache_before)
+            os.chmod(key_path, 0o600)
+            recovered = self.run_hook(json.dumps({
+                'hook_event_name': 'UserPromptSubmit', 'session_id': 'receipt-retry',
+                'prompt_id': 'recovered-receipt', 'prompt': 'Hello',
+            }), 'he', '--state-dir', str(state))
+            self.assertEqual(recovered, {})
+            skipped_path = next(path for path in state.glob('batch-*/**/*.json')
+                                if json.loads(path.read_text())['outcome'] == 'skipped')
+            marker = skipped_path.parent.name.removeprefix('batch-') + ':' + skipped_path.stem
+            hook_receipt.verify(state, marker, 'receipt-retry', 'recovered-receipt',
+                                'UserPromptSubmit', self._receipt_version(), 'skipped')
+
     def test_old_session_gets_one_prompt_bootstrap_and_sessions_are_independent(self):
         with tempfile.TemporaryDirectory(dir=Path.home()) as directory:
             state = Path(directory) / 'state'
