@@ -52,6 +52,106 @@ class HomeFixture(unittest.TestCase):
 
 
 class RuntimeTests(HomeFixture):
+    def delegate(self, **extra):
+        return self.event('PreToolUse', 'Agent', {'description': 'delegate'}, **extra)
+
+    def substantial_plan(self):
+        return {'stages': [{
+            'number': 1, 'name': 'implementation', 'worker_id': 'worker-1',
+            'worker_model': 'declared-model', 'worker_effort': 'low',
+            'model_rationale': 'adequate for bounded implementation',
+            'inputs': ['request'], 'boundaries': ['listed files'], 'dependencies': [],
+            'definition_of_done': 'Implement the scoped change', 'outputs': ['result.txt'],
+            'qa': {'check': 'Read result.txt', 'expected': 'contains result'}
+        }]}
+
+    def test_native_delegation_requires_substantial_plan(self):
+        for tool_name in ('Agent', 'spawn_agent'):
+            with self.subTest(tool_name=tool_name):
+                result = core.run(self.event('PreToolUse', tool_name, {'description': 'delegate'}))
+                self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertFalse(workflow.STATE.exists())
+        self.assertEqual(workflow._stop(self.event('Stop')), {})
+        self.assertIn('Do not retry Agent', self.reason(result))
+        self.assertIn('stages', self.reason(result))
+
+    def test_native_delegation_rejects_missing_identity(self):
+        result = core.run(self.delegate(session_id=''))
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_native_delegation_rejects_compact_plan(self):
+        self.sentinel('plan', {'definition_of_done': 'Do work', 'outputs': ['x'], 'qa': {'check': 'Read', 'expected': 'text'}})
+        result = core.run(self.delegate())
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertIn('substantial', self.reason(result).lower())
+
+    def test_native_delegation_accepts_ready_substantial_plan(self):
+        self.sentinel('plan', self.substantial_plan())
+        self.assertEqual(core.run(self.delegate()), {})
+
+    def test_native_delegation_rejects_terminal_and_blocked_plans(self):
+        self.sentinel('plan', self.substantial_plan())
+        path = workflow._ledger_path('fixture-session', 'fixture-turn')
+        for state in ('complete', 'blocked'):
+            ledger = workflow._read(path)
+            ledger['state'] = state
+            core._atomic_write(path, ledger)
+            result = core.run(self.delegate())
+            self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_native_delegation_rejects_damaged_substantial_schemas(self):
+        self.sentinel('plan', self.substantial_plan())
+        path = workflow._ledger_path('fixture-session', 'fixture-turn')
+        baseline = workflow._read(path)
+        for damage in ('missing_worker', 'duplicate_number', 'duplicate_name', 'unsupported_schema', 'boolean_schema', 'float_schema'):
+            with self.subTest(damage=damage):
+                ledger = json.loads(json.dumps(baseline))
+                if damage == 'missing_worker':
+                    del ledger['stages'][0]['worker_model']
+                elif damage == 'duplicate_number':
+                    stage = dict(ledger['stages'][0])
+                    stage['name'] = 'implementation-2'
+                    ledger['stages'].append(stage)
+                elif damage == 'duplicate_name':
+                    stage = dict(ledger['stages'][0])
+                    stage['number'] = 2
+                    ledger['stages'].append(stage)
+                elif damage == 'unsupported_schema':
+                    ledger['schema_version'] = 2
+                elif damage == 'boolean_schema':
+                    ledger['schema_version'] = True
+                else:
+                    ledger['schema_version'] = 1.0
+                core._atomic_write(path, ledger)
+                result = core.run(self.delegate())
+                self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+                core._atomic_write(path, baseline)
+
+    def test_claude_native_prompt_id_adapts_for_delegation(self):
+        payload = {'hook_event_name': 'PreToolUse', 'session_id': 'claude-session', 'prompt_id': 'claude-prompt',
+                   'cwd': str(self.project), 'tool_name': 'Agent', 'tool_input': {}}
+        result = core.run(payload, claude=True)
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertFalse(core.CLAUDE_STATE.exists())
+        command = 'workflow-ledger plan ' + shlex.quote(json.dumps(self.substantial_plan()))
+        saved = core.run({**payload, 'tool_name': 'Bash', 'tool_input': {'command': command}}, claude=True)
+        self.assertIn('Plan saved', self.reason(saved))
+        self.assertEqual(core.run(payload, claude=True), {})
+        self.assertTrue(core.CLAUDE_STATE.exists())
+
+    def test_native_delegation_corrupt_state_denies_compactly(self):
+        path, _ = core._ensure_ledger(self.delegate(), workflow.STATE, str(self.project), 'substantial')
+        path.write_text('{broken')
+        result = core.run(self.delegate())
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertLessEqual(len(self.reason(result)), 300)
+
+    def test_native_delegation_handler_exception_denies(self):
+        with patch.object(core, '_protected_scope', side_effect=RuntimeError('fixture failure')):
+            result = core.run(self.delegate())
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertLessEqual(len(self.reason(result)), 300)
+
     def test_plan_scope_stop_and_qa(self):
         write = self.event('PreToolUse', 'Write', {'file_path': str(self.project / 'notes.txt'), 'content': 'checked'})
         self.assertEqual(core.run(write)['hookSpecificOutput']['permissionDecision'], 'deny')
@@ -122,6 +222,32 @@ class InstallerTests(HomeFixture):
             self.assertNotIn('PreToolUse', after['hooks'])
             self.assertTrue(any((path.parent/'workflow-hooks-kit/backups').glob('*'+path.name)))
 
+    def test_delegation_matcher_is_installed_idempotently(self):
+        installer.operate(self.home, 'claude')
+        installer.operate(self.home, 'claude')
+        data = json.loads(self.config('claude').read_text())
+        group = data['hooks']['PreToolUse'][0]
+        self.assertEqual(group['matcher'], installer.MATCHER)
+        self.assertIn('Agent', group['matcher'])
+        self.assertIn('spawn_agent', group['matcher'])
+        self.assertEqual(len(data['hooks']['PreToolUse']), 1)
+
+    def test_legacy_owned_matcher_migrates_without_duplicate_groups(self):
+        installer.operate(self.home, 'claude')
+        legacy = next(iter(installer.LEGACY_MATCHERS))
+        config = self.config('claude')
+        data = json.loads(config.read_text())
+        data['hooks']['PreToolUse'][0]['matcher'] = legacy
+        config.write_text(json.dumps(data))
+        receipt = self.home/'.claude/workflow-hooks-kit/install-receipt.json'
+        owned = json.loads(receipt.read_text())
+        owned['owned']['PreToolUse']['matcher'] = legacy
+        receipt.write_text(json.dumps(owned))
+        installer.operate(self.home, 'claude')
+        updated = json.loads(config.read_text())['hooks']['PreToolUse']
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0]['matcher'], installer.MATCHER)
+
     def test_original_exact_hooks_are_not_claimed(self):
         path = self.config('codex')
         path.parent.mkdir()
@@ -187,6 +313,65 @@ class InstallerTests(HomeFixture):
             result = subprocess.run([sys.executable, '-B', str(installed), '--help'], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_optional_mcp_shared_store_runtime_and_reversible_ownership(self):
+        shared = self.home / 'shared learning'
+        for platform in (('codex', 'claude') if sys.version_info >= (3, 11) else ('claude',)):
+            installer.operate(self.home, platform)
+            target = self.home / ('.codex/config.toml' if platform == 'codex' else '.claude.json')
+            self.assertFalse(target.exists())
+            original = 'model = "fixture"' if platform == 'codex' else '{"fixture": true}'
+            target.write_text(original)
+            for _ in range(2):
+                installer.operate(self.home, platform, learning_mcp=True, state_dir=shared)
+            if platform == 'codex':
+                import tomllib
+                definition = tomllib.loads(target.read_text())['mcp_servers'][installer.MCP_NAME]
+            else:
+                definition = json.loads(target.read_text())['mcpServers'][installer.MCP_NAME]
+            runtime = Path(definition['args'][1])
+            self.assertEqual(runtime.read_bytes(), (ROOT / 'learning/mcp_server.py').read_bytes())
+            self.assertEqual((runtime.parent / 'cli.py').read_bytes(), (ROOT / 'learning/cli.py').read_bytes())
+            request = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2024-11-05'}}) + '\n'
+            request += json.dumps({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}) + '\n'
+            result = subprocess.run([definition['command'], *definition['args']], input=request, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('learning_status', result.stdout)
+            installer.operate(self.home, platform, uninstall=True)
+            if platform == 'codex':
+                self.assertEqual(target.read_text(), original)
+            else:
+                self.assertEqual(json.loads(target.read_text()), json.loads(original))
+            self.assertTrue(shared.exists())
+
+    def test_mcp_collisions_and_changed_owned_definitions_preserved(self):
+        for platform in (('codex', 'claude') if sys.version_info >= (3, 11) else ('claude',)):
+            installer.operate(self.home, platform)
+            target = self.home / ('.codex/config.toml' if platform == 'codex' else '.claude.json')
+            collision = '[mcp_servers.workflow_learning]\ncommand = "foreign"\n' if platform == 'codex' else '{"mcpServers":{"workflow_learning":{"command":"foreign"}}}'
+            target.write_text(collision)
+            with self.assertRaises(ValueError):
+                installer.operate(self.home, platform, learning_mcp=True)
+            self.assertEqual(target.read_text(), collision)
+            target.write_text('' if platform == 'codex' else '{}')
+            installer.operate(self.home, platform, learning_mcp=True)
+            edited = target.read_text().replace('mcp_server.py', 'edited_server.py')
+            target.write_text(edited)
+            with self.assertRaises(ValueError):
+                installer.operate(self.home, platform, learning_mcp=True)
+            installer.operate(self.home, platform, uninstall=True)
+            self.assertEqual(target.read_text(), edited)
+
+    def test_optional_plugin_configuration_and_adjacent_runtime(self):
+        output = self.home / 'optional.plugin'
+        builder.build(output, learning_mcp=True, state_dir=self.home / 'shared')
+        with zipfile.ZipFile(output) as archive:
+            definition = json.loads(archive.read('.mcp.json'))['mcpServers']['workflow_learning']
+            self.assertEqual(definition['args'][1], '${CLAUDE_PLUGIN_ROOT}/learning/mcp_server.py')
+            self.assertIn('learning/cli.py', archive.namelist())
+            self.assertEqual(archive.read('learning/mcp_server.py'), (ROOT/'learning/mcp_server.py').read_bytes())
+        with self.assertRaises(ValueError):
+            builder.build(output, learning_mcp=True)
+
     def test_build_deterministic_and_python_syntax(self):
         first, second = self.home/'first.plugin', self.home/'second.plugin'
         builder.build(first)
@@ -195,6 +380,8 @@ class InstallerTests(HomeFixture):
         with zipfile.ZipFile(first) as archive:
             self.assertIn('learning/cli.py', archive.namelist())
             self.assertIn('learning/README.md', archive.namelist())
+            self.assertIn('learning/mcp_server.py', archive.namelist())
+            self.assertNotIn('.mcp.json', archive.namelist())
             self.assertFalse(any('test_cli' in name or 'state.json' in name for name in archive.namelist()))
         for path in ROOT.rglob('*.py'):
             if 'Old' not in path.parts:
