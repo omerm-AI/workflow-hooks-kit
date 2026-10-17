@@ -616,12 +616,25 @@ def run(payload):
 
 
 def main():
+    data = None
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT+1)
         if len(raw) > MAX_INPUT: result = {"systemMessage": "Session workflow hook input exceeds limit (fail-open)."}
         else:
             data = json.loads(raw.decode("utf-8")); result = run(data) if isinstance(data, dict) else {}
     except Exception as exc: result = {"systemMessage": f"Session workflow hook input error (fail-open): {type(exc).__name__}: {exc}"}
+    if isinstance(data, dict):
+        try:
+            import native_receipt
+            components = (Path(__file__), Path(__file__).with_name("hook_receipt.py"),
+                          Path(native_receipt.__file__))
+            version = native_receipt.handler_version("workflow-codex-v1", components)
+            receipt_state = STATE.parent / "hook-receipts" / "session-workflow"
+            native_receipt.create_native(receipt_state, data,
+                                         native_receipt.outcome_for(result, skipped=not bool(result)),
+                                         version)
+        except Exception as exc:
+            sys.stderr.write(f"Native hook receipt unavailable: {type(exc).__name__}.\n")
     sys.stdout.write(json.dumps(result, ensure_ascii=False)+"\n"); return 0
 
 if __name__ == "__main__": raise SystemExit(main())
