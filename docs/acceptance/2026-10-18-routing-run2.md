@@ -12,7 +12,7 @@ In the treatment arm, the native routing hook supplied the exact frozen numbered
 
 The native API does not expose the worker's complete static system context. Worker-tagged attachments are now measured independently; they do not substitute for an unavailable complete inventory. The sandbox covers the named known sources and does not prove absence of every possible undisclosed host input.
 
-The control dispatch used the native background default. Its launch and worker inference were observed, but the controller did not retain the subsequent worker output. Therefore exact-output completion for the control remains **Open**. The controller's `pair-observed-awaiting-review` label does not mean the complete experiment passed. No further model run was performed after the iteration limit.
+The control dispatch used the native background default. Its launch and worker inference were observed, but the controller did not retain the subsequent worker output. Therefore exact-output completion for the control remains **Open**. The controller's `pair-observed-awaiting-review` label does not mean the complete experiment passed. The observer saw two model steps in ON and three in OFF. The background completion started another parent turn despite the per-turn cap; a per-turn limit is not a whole-process inference budget. These are observed steps, not a measured subscription-quota conversion. No further model run was performed after the iteration limit.
 
 ## Codex: corrected launch, unresolved interception
 
@@ -27,7 +27,7 @@ These failures belong to test setup and diagnostic retention, not evidence that 
 - Validate the complete effective configuration through a renderer/startup check; `--help` proves argument syntax, not semantic configuration validity.
 - Verify the disposable repository root and explicit prompt input before inference.
 - Preserve bounded error and answer diagnostics, actual tool arguments, worker completion and native receipt outcomes for every attempt.
-- Read actual receipt schemas and native foreground/background defaults before writing acceptance conditions.
+- Read actual receipt schemas and native foreground/background defaults before writing acceptance conditions. Bound automatic background-completion turns separately from a per-turn cap.
 - Remove ambient plugin-directory environment settings before launch, assert an allowed plugin inventory, and assert that no plugin starts an unlisted MCP server/tool; distinguish engine attachments from connected servers.
 - Use the same admission logic in treatment/control. Record completed worker output by agent identity, including background completion.
 - Keep operator-defined capability/rank policy separate from measured model capability, billing and quota savings.
