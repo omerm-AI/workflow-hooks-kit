@@ -79,3 +79,5 @@ The operator selected known native save gates with uncovered paths disclosed. Th
 | Automatic historical cleanup/all helpers and semantic dependency proof | Open | Open | No installation-time sweep. Transfers accept reviewed eligible media/PDF only, bounded literal references cannot prove dynamic/external use, and unresolved files stay in place. |
 
 See [limited-mode acceptance and cleanup boundaries](acceptance/2026-10-20-file-tools.md) and [customer status with installation prompts](hygiene-customer-status.md).
+
+Additional Claude default-registration evidence: a separate seven-check conversation witness ran without explicit settings or restricted mode, with zero tools/model forwarding under network denial. Two HMAC records matched the actual session and current source; prompt ID remained unavailable. This strengthens the named Claude registration boundary only.

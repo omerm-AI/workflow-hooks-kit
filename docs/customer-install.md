@@ -127,3 +127,5 @@ python3 tools/hygiene_cleanup_smoke.py --platform both --hygiene-mode file-tools
 ```
 
 This must be a new home, never a real project. It verifies duplicate archival, Assets relocation, protected references, original bytes/timestamps and restore without overwrite. It does not scan or clean unrelated projects and is not native-session adoption proof. For project work, open the intended exact project directory; backups use the host-protected root rather than automatically identifying every nested Git repository.
+
+The current limited-mode tag also passed a fresh anonymous public clone and both mode-matched smoke/cleanup tools with zero model calls. See [current limited-mode acceptance](acceptance/2026-10-20-file-tools.md). These are actual installed-command replays; they do not substitute for step 4 in the customer account.

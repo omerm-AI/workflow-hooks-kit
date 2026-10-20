@@ -7,7 +7,7 @@
 | Area | Status | What this means |
 |---|---|---|
 | Supported edits in test projects | Tested and proven on Codex and Claude Code | Tests overwrote existing files, verified the original bytes in `Old`, blocked a following edit until review, and blocked an unfinished Stop. |
-| Fresh public install commands | Tested and proven on both | The earlier immutable preview was cloned and the recorded installer commands passed smoke checks in separate disposable homes, including a project that already contained files. The checks made no model calls. |
+| Fresh public install commands | Tested and proven on both | The current limited-mode immutable tag was cloned anonymously over HTTPS and the recorded installer commands passed smoke checks in separate disposable homes, including a project that already contained files. The checks made no model calls. |
 | First native callback from an installed preview | Tested and proven on Claude Code; Open on a fresh Codex profile | An earlier strict preview on Claude blocked an actual unreviewed Write. This is not substituted for the selected limited-mode canary. Codex's fresh-customer profile discovered its hooks, but still needs normal subscription login, hook trust, and a native canary. |
 | Selected operator limited-mode activation | Tested and proven on both | Codex passed 20 checks; corrected Claude trial passed 23, including same-live-session and fresh-session behavior. Independent source/settings/watchdog checks preceded permanent activation. This does not replace fresh-customer canaries or prove every old process loaded new definitions. |
 | Every account, project, session, and tool path | Open | Hook delivery, trust, managed settings, and host limits vary. Already-open sessions need separate adoption evidence. |
@@ -51,3 +51,5 @@ The current runtime cannot automatically organize every historical draft or help
 ## Selected limited mode
 
 `--hygiene-file-tools` is the explicitly limited option: known native file saves and Stop require review and verified beforeimages. Shell/connector writes are outside that gate and retain baseline behavior. It does not certify all saves in every tool. The separate strict `--hygiene-enforcement` option blocks unknown shell/connector calls and must never be silently substituted. Open each intended project at its exact working root; the hook does not automatically discover every nested Git boundary.
+
+The latest published-tag replay and Claude default-settings zero-model witness are recorded in [limited-mode acceptance](acceptance/2026-10-20-file-tools.md). They do not remove the separate fresh-profile native canary requirement.
