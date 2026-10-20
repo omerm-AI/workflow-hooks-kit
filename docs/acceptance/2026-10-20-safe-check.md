@@ -38,3 +38,9 @@ Only generic source and summarized acceptance are public. Local paths, account m
 The Claude native trial reached the agreed attempt cap. No additional subscription call was made after the failed acceptance. The operator must review an additional attempt before it runs. The prepared next harness removes only the outer test sandbox; the installed inner runner, vendor context protection, empty observed work-context checks and one-request cap remain. No product security restriction is removed to obtain success.
 
 The fresh public Codex profile login/trust prerequisite in the first-install record remains a distinct Open item. The successful native Codex trial used the normal existing subscription configuration and actual installed private-compatible command with isolated workflow state; it is not substituted for a new customer's login.
+
+## Fresh public preview installation
+
+The published immutable safe-check tag was cloned over public HTTPS into a new checkout. Its commit matched the tag, the checkout stayed clean, and the smoke tool installed both hosts into a new external-test home. All four new/populated-project cases passed, including the real installed-command safe checks, exact Old bytes, next-edit denial and Stop block/release. Model calls: zero. This is fresh public installation and callback-command acceptance, not a substitute for native inference.
+
+Regression evidence is 238 passing suite cases plus the separately passing inherited-sandbox regression. No private paths, identities or raw logs accompany this report.
