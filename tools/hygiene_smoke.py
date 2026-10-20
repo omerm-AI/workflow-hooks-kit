@@ -15,7 +15,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def exercise(home, platform):
+def exercise(home, platform, mode="enforce"):
     spec = importlib.util.spec_from_file_location('smoke_installer', ROOT / 'install.py')
     installer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(installer)
@@ -28,8 +28,8 @@ def exercise(home, platform):
     previous.mkdir()
     (previous / 'current.txt').write_bytes(b'Original fixture bytes\n')
     (previous / 'required-source.txt').write_bytes(b'Keep required source unchanged\n')
-    installer.operate(home, platform, hygiene_enforcement=True)
-    installer.operate(home, platform, hygiene_enforcement=True)
+    installer.operate(home, platform, hygiene_enforcement=mode == "enforce", hygiene_file_tools=mode == "file-tools")
+    installer.operate(home, platform, hygiene_enforcement=mode == "enforce", hygiene_file_tools=mode == "file-tools")
     assert (previous / 'current.txt').read_bytes() == b'Original fixture bytes\n'
     assert not (previous / 'Old').exists(), 'Installer must not retroactively reorganize project files'
     caller_home = home / 'different-caller-home'
@@ -114,9 +114,11 @@ def exercise(home, platform):
             assert safe_check("open('current.txt', 'w').write('wrong')")['status'] == 'failed'
             assert target.read_text() == 'Updated fixture bytes\n'
         for tool in ('mcp__filesystem__write_file', 'mcp.fake.exec_command', 'functions.exec', 'write_stdin'):
-            assert denied(call('PreToolUse', tool, {'path': 'next.txt', 'cmd': 'touch next.txt'}))
-        for command in ('pwd', 'git status', 'touch next.txt'):
-            assert denied(call('PreToolUse', 'Bash', {'command': command}))
+            result = call('PreToolUse', tool, {'path': 'next.txt', 'cmd': 'touch next.txt'})
+            assert denied(result) if mode == 'enforce' else not denied(result)
+        for command in (('pwd', 'git status', 'touch next.txt') if mode == 'enforce' else ('pwd', 'git status')):
+            result = call('PreToolUse', 'Bash', {'command': command})
+            assert denied(result) if mode == 'enforce' else not denied(result)
         review()
         qa = sentinel('workflow-ledger', 'qa', {'state': 'complete', 'qa': {
             'evidence': 'Harness compared actual new output, exact Old bytes and retained canary',
@@ -126,13 +128,13 @@ def exercise(home, platform):
         assert canary.read_bytes() == b'Keep required source unchanged\n'
         assert not (caller_home / '.codex').exists() and not (caller_home / '.claude').exists(), 'Hook state escaped installation home'
         results.append({'folder': kind, 'beforeimage': True, 'next_edit_denied': True,
-                        'stop_block_and_release': True, 'unknown_tools_denied': True,
+                        'stop_block_and_release': True, 'unknown_tools_denied': mode == 'enforce',
                         'required_source_unchanged': True})
     installer.operate(home, platform, uninstall=True)
     restored = json.loads(config.read_text())
     assert restored == {'hooks': {'PreToolUse': [{'matcher': 'Read', 'hooks': [foreign]}]}}
     assert (kit / 'bin/tool_scope_hook.py').exists(), 'Recovery runtime must be retained'
-    return {'platform': platform, 'idempotent_install': True, 'foreign_settings_preserved': True,
+    return {'platform': platform, 'policy_mode': mode, 'idempotent_install': True, 'foreign_settings_preserved': True,
             'uninstall_preserves_recovery': True, 'cases': results}
 
 
@@ -140,13 +142,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--home', type=Path, required=True, help='New absolute disposable directory; must not exist')
     parser.add_argument('--platform', choices=('codex', 'claude', 'both'), default='both')
+    parser.add_argument('--hygiene-mode', choices=('enforce', 'file-tools'), default='enforce')
     args = parser.parse_args()
     home = args.home.expanduser()
     if not home.is_absolute() or home.exists() or home.is_symlink():
         parser.error('--home must be a new absolute disposable directory, never an existing account home')
     home.mkdir(mode=0o700, parents=True)
     platforms = ('codex', 'claude') if args.platform == 'both' else (args.platform,)
-    results = [exercise(home / platform, platform) for platform in platforms]
+    results = [exercise(home / platform, platform, args.hygiene_mode) for platform in platforms]
     print(json.dumps({'status': 'pass', 'kind': 'installed-command-replay-not-native',
                       'model_calls': 0, 'results': results}, indent=2))
 

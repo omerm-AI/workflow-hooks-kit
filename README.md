@@ -4,7 +4,7 @@ Version 0.1.0. Portable local planning, scope and verification checkpoints for C
 
 ## Customer bootstrap prompts
 
-Start with the [step-by-step customer guide](docs/customer-install.md), or give your agent the [Codex install prompt](prompts/install-hygiene-codex.he.txt) / [Claude Code install prompt](prompts/install-hygiene-claude-code.he.txt). These install the reviewed opt-in preview rather than relying on memory. Installation does not retroactively reorganize projects; protection applies to future covered work in new or existing folders. Read the strict shell restrictions before activation.
+Start with the [step-by-step customer guide](docs/customer-install.md), or give your agent the [Codex install prompt](prompts/install-hygiene-codex.he.txt) / [Claude Code install prompt](prompts/install-hygiene-claude-code.he.txt). These install the reviewed opt-in preview rather than relying on memory. Installation does not retroactively reorganize projects; protection applies to future covered work in new or existing folders. The selected file-tools preview gates known native saves; shell/connector writes remain explicitly uncovered. Read the mode limits before activation.
 
 ## Install
 
@@ -67,6 +67,8 @@ Tests use temporary homes under your home directory (the core intentionally reje
 
 [The stage request validator](docs/delegation-binding.md) mechanically binds a canonical DoD packet and requested model to a frozen stage. It is not yet connected to a native enforcement handler. A separate native input-rewrite sample establishes a possible delivery path, without certifying full routing or QA enforcement.
 
-## Strict hygiene candidate
+## Native-file hygiene preview
 
-An explicit `--hygiene-enforcement` option adds supported-file preflight, verified prior-byte backups, post-edit review gates and conservative reversible transfers. Native guard tests have observed Write/patch then Stop blocks in disconnected fresh/existing project fixtures. This does **not** certify universal customer rollout or interception of every native/MCP/shell path. Strict mode rejects unverified shell writes and may prevent ordinary builds. Read [the contract and limits](docs/hygiene-enforcement.md) and [acceptance evidence](docs/acceptance/2026-10-20-hygiene.md) before opting in. Existing installations are not silently enabled.
+The customer guide selects `--hygiene-file-tools`: known native saves and Stop are gated while ordinary shell/connector writes remain Open. The separate strict `--hygiene-enforcement` option adds supported-file preflight, verified prior-byte backups, post-edit review gates and conservative reversible transfers. Native guard tests have observed Write/patch then Stop blocks in disconnected fresh/existing project fixtures. This does **not** certify universal customer rollout or interception of every native/MCP/shell path. Strict mode rejects unverified shell writes and may prevent ordinary builds. Read [the contract and limits](docs/hygiene-enforcement.md) and [acceptance evidence](docs/acceptance/2026-10-20-hygiene.md) before opting in. Existing installations are not silently enabled.
+
+See the [current customer summary](docs/hygiene-customer-status.md) and [limited-mode acceptance](docs/acceptance/2026-10-20-file-tools.md) for cleanup demonstrations, installation and existing-folder/session limits.

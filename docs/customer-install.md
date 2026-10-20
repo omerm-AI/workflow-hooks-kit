@@ -1,11 +1,11 @@
-# Customer installation: strict project hygiene
+# Customer installation: limited native-file hygiene
 
-This opt-in installs strict hygiene for Codex or Claude Code. The supported sequence uses two separate disposable homes: a model-free smoke home, then an installed native-canary home. Only after native evidence may the selected real account be installed. Python 3.9+ on macOS/Linux is required. Overall customer rollout remains **Open**; narrower results are **Tested and proven** only for their measured boundaries.
+This opt-in installs the explicitly limited file-tools hygiene mode for Codex or Claude Code. Known native saves and Stop are gated; shell and connector writes retain baseline behavior and are not covered. The supported sequence uses two separate disposable homes: a model-free smoke home, then an installed native-canary home. Only after native evidence may the selected real account be installed. Python 3.9+ on macOS/Linux is required. Overall customer rollout remains **Open**; narrower results are **Tested and proven** only for their measured boundaries.
 
 ## 1. Clone and inspect the reviewed preview
 
 ```sh
-git clone --branch hygiene-safe-check-preview-2026-10-20 --depth 1 https://github.com/omerm-AI/workflow-hooks-kit.git workflow-hooks-kit-preview
+git clone --branch hygiene-file-tools-preview-2026-10-20 --depth 1 https://github.com/omerm-AI/workflow-hooks-kit.git workflow-hooks-kit-preview
 cd workflow-hooks-kit-preview
 git status --short
 git rev-parse HEAD
@@ -21,24 +21,24 @@ Inspect the chosen account for an equivalent kit, plugin, custom hook core, or a
 Choose exactly one platform. Pass an absolute path to a new home that does not yet exist; do not create the directory yourself. The smoke script creates it, checks configuration coexistence and idempotence, exercises the installed guard without model calls, then removes its temporary hook registration. This home is not the native-canary home.
 
 ```sh
-python3 tools/hygiene_smoke.py --home /absolute/new/smoke-home --platform codex
+python3 tools/hygiene_smoke.py --home /absolute/new/smoke-home --platform codex --hygiene-mode file-tools
 # or
-python3 tools/hygiene_smoke.py --home /absolute/new/smoke-home --platform claude
+python3 tools/hygiene_smoke.py --home /absolute/new/smoke-home --platform claude --hygiene-mode file-tools
 ```
 
 Keep the output. If the home already exists, the tool is missing, or the result fails or is unclear, stop before the native canary and report the blocker. A pass does not prove native hook activation.
 
 ## 3. Install a second disposable home for the native canary
 
-Choose a different absolute path that also does not yet exist. Run the actual installer with strict mode enabled; do not reuse the smoke home:
+Choose a different absolute path that also does not yet exist. Run the actual installer with the selected file-tools mode enabled; do not reuse the smoke home:
 
 ```sh
-python3 install.py --platform codex --home /absolute/new/codex-native-home --hygiene-enforcement
+python3 install.py --platform codex --home /absolute/new/codex-native-home --hygiene-file-tools
 # or
-python3 install.py --platform claude --home /absolute/new/claude-native-home --hygiene-enforcement
+python3 install.py --platform claude --home /absolute/new/claude-native-home --hygiene-file-tools
 ```
 
-Inspect the installer result and the second home's settings/runtime. This changes only the disposable home. It merges hook settings, installs runtime files including `WORK_STANDARDS.md`, and creates the strict policy marker and recovery state. It does not alter project files. Confirm unrelated settings were retained before attempting the native canary.
+Inspect the installer result and the second home's settings/runtime. This changes only the disposable home. It merges hook settings, installs runtime files including `WORK_STANDARDS.md`, and creates the selected file-tools policy marker and recovery state. It does not alter project files. Confirm unrelated settings were retained before attempting the native canary.
 
 ## 4. Verify native trust and behavior before real installation
 
@@ -68,17 +68,17 @@ Check relevant managed and project-level settings for overrides. A fresh canary 
 
 ## 5. Install into the selected real account
 
-Strict mode rejects ordinary shell commands without a verified write boundary, including builds or generators that may write files. Disclose this effect and the evidence scope before installation. An explicit request to install authorizes this opt-in; do not add another approval step when that request is clear.
+File-tools mode leaves ordinary shell and connectors under the existing baseline policy. Their writes are outside this hygiene gate. Disclose this gap before installation. The separate --hygiene-enforcement strict option blocks uninspectable shell/connector calls; it is not silently selected here. An explicit request to install authorizes this opt-in; do not add another approval step when that request is clear.
 
 After the smoke check, second-home install, and native canary pass for the selected client, run only that platform's command:
 
 ```sh
-python3 install.py --platform codex --hygiene-enforcement
+python3 install.py --platform codex --hygiene-file-tools
 # or
-python3 install.py --platform claude --hygiene-enforcement
+python3 install.py --platform claude --hygiene-file-tools
 ```
 
-The installer changes the selected account's host settings, runtime, strict-policy marker, receipts/backups, and private local workflow state as applicable. Inspect reported paths and confirm unrelated settings remain intact. It does not edit existing project files, scan trees, or perform bulk cleanup. Existing projects are considered only during later work when covered calls reach the installed hooks; there is no retroactive cleanup. Test whether already-open sessions adopt the settings.
+The installer changes the selected account's host settings, runtime, selected-mode policy marker, receipts/backups, and private local workflow state as applicable. Inspect reported paths and confirm unrelated settings remain intact. It does not edit existing project files, scan trees, or perform bulk cleanup. Existing projects are considered only during later work when covered calls reach the installed hooks; there is no retroactive cleanup. Test whether already-open sessions adopt the settings.
 
 ## 6. Make the policy available during later work
 
@@ -90,7 +90,7 @@ The native hooks provide executable gates for supported events. When a covered t
 
 Supported intercepted ledger sentinels are `workflow-ledger plan` and `workflow-ledger qa`. Supported hygiene sentinels are `workflow-hygiene inspect`, `workflow-hygiene read`, `workflow-hygiene review`, `workflow-hygiene restore`, and the macOS-only bounded `workflow-hygiene check`. Send exact standalone commands through the native hooked shell tool; they are intercepted and are not ordinary shell programs. Use native known file tools for edits after review accepts the exact target. Do not bypass denials through aliases, another shell, connectors, or unreviewed tools.
 
-Before editing an existing file, preserve it in a unique folder under that project's `Old/YYYY-MM/`, retaining its relative path and verifying the archive hash. A new file has no previous version to back up. Finish post-edit review and workflow QA before the next edit. Keep required source, tests, docs, configuration, dependencies, and helpers where the project requires them. Put other helpers in `Assets` with the recovery structure. Check local and declared external dependencies and concurrent work before moving anything. Archive only a reviewed byte-identical supported media/document duplicate with a distinct canonical copy and no detected local literal references. If uncertain, retain it and ask the operator. Never permanently delete history, automatically edit unrelated folders, or infer disuse from age or name.
+Before an accepted native edit of an existing file, the guard preserves its previous bytes in a unique folder under that project's `Old/YYYY-MM/`, retaining its relative path and verifying the archive hash. Confirm that artifact in the native canary; do not add a second manual copy. A new file has no previous version to back up. Finish post-edit review and workflow QA before the next edit. Keep required source, tests, docs, configuration, dependencies, and helpers where the project requires them. Put other helpers in `Assets` with the recovery structure. Check local and declared external dependencies and concurrent work before moving anything. Archive only a reviewed byte-identical supported media/document duplicate with a distinct canonical copy and no detected local literal references. If uncertain, retain it and ask the operator. Never permanently delete history, automatically edit unrelated folders, or infer disuse from age or name.
 
 The guard cannot cover unknown MCP/connector effects, external editors, other machines, native paths that do not send supported events, every dynamic/external reference, same-account tampering, or host Stop limits. Bounded scans and review notes do not prove semantic correctness. Never claim universal enforcement or 100% safety. Uninstall retains runtime state and backups for recovery; review them before reinstalling.
 
@@ -102,7 +102,7 @@ See [strict hygiene contract and limits](hygiene-enforcement.md), [binary hook a
 
 ## Measured first-time installation
 
-The immutable preview was cloned over public HTTPS into a fresh checkout and its commit matched the remote tag. All four installed-command smoke cases passed without model calls. Claude Code then executed the unchanged recorded installer command in a fresh staging home, denied an actual unreviewed Write and emitted matching source-bound native receipts using one subscription request. A disclosed test-only UPS prepared the baseline plan but supplied no hygiene review. Codex fresh-profile discovery passed; login/trust remain prerequisites for its native test. See [first-install record](acceptance/2026-10-20-first-install.md).
+The earlier strict/safe-check immutable preview was cloned over public HTTPS into a fresh checkout and its commit matched the remote tag. All four installed-command smoke cases passed without model calls. Claude Code then executed the unchanged recorded installer command in a fresh staging home, denied an actual unreviewed Write and emitted matching source-bound native receipts using one subscription request. A disclosed test-only UPS prepared the baseline plan but supplied no hygiene review. This historical Claude result does not substitute for a selected file-tools native canary. Codex fresh-customer profile discovery passed; login/trust remain prerequisites for that separate native test. The current operator account has its own limited-mode evidence in [the current acceptance](acceptance/2026-10-20-file-tools.md). See [first-install record](acceptance/2026-10-20-first-install.md).
 
 ## Bounded safe checks on macOS
 
@@ -117,3 +117,13 @@ Use the actual absolute interpreter under the project or a supported system runt
 The timeout is a shared 1–3 second budget including backend preflight, and combined process output is capped at 8192 bytes. Cleanup visits at most 128 entries and eight levels; excess scratch is retained privately and reported. This is not a total disk/memory quota or protection from a separate hostile process using the same account. Builds/tests requiring child processes, project writes or longer runs are unsupported; Linux/Windows have no accepted check backend. Refuse unsupported checks rather than bypassing the gate.
 
 The original shell request is intentionally denied after handling the sentinel. Its JSON result is process evidence only: exit zero never approves workflow QA or pending post-edit review. Global strict deployment remains disabled by the operator's explicit choice pending separate native adoption acceptance. See [safe-check acceptance](acceptance/2026-10-20-safe-check.md).
+
+## Historical clutter and reproducible cleanup proof
+
+Read [the customer status summary](hygiene-customer-status.md) for the differences between an existing folder, an already-running session, and a historical cleanup audit. To demonstrate the installed cleanup code on disposable pre-populated folders only, run:
+
+```sh
+python3 tools/hygiene_cleanup_smoke.py --platform both --hygiene-mode file-tools --home /absolute/new/cleanup-proof-home
+```
+
+This must be a new home, never a real project. It verifies duplicate archival, Assets relocation, protected references, original bytes/timestamps and restore without overwrite. It does not scan or clean unrelated projects and is not native-session adoption proof. For project work, open the intended exact project directory; backups use the host-protected root rather than automatically identifying every nested Git repository.

@@ -71,3 +71,9 @@ Pre/Post matchers now cover every delivered tool event. Strict mode uses full na
 ## Safe test execution boundary
 
 The macOS-only `workflow-hygiene check` sentinel supplies a bounded single-process read-only-project execution path. The kernel denies project/outside writes, fork/spawn, network and private data reads outside approved roots; only private scratch writes are permitted. It does not authorize ordinary shell commands or replace review/QA. Maximum 3 seconds including confinement preflight, 8192 bytes output; no accepted backend means no execution. Builds requiring children/project writes remain unsupported. Global activation requires separate evidence. See [the measured acceptance](acceptance/2026-10-20-safe-check.md).
+
+## Explicitly limited file-tools mode
+
+`python3 install.py --platform codex --hygiene-file-tools` (or `--platform claude`) enables only known native file saves plus post-edit/Stop review. It retains the same exact prior-byte backups and review gate as strict mode. Ordinary shell, connectors and other tools retain baseline behavior and can bypass this hygiene boundary; those paths remain Open. Valid hygiene/ledger sentinels remain intercepted before any passthrough. The two mode flags are mutually exclusive, and an existing different policy is preserved/refused rather than silently downgraded.
+
+The default installer without either flag leaves hygiene disabled unless a retained prior policy exists. An installed config or mode marker is not native old/new-session adoption evidence. Read [the customer summary](hygiene-customer-status.md) before activation.

@@ -31,16 +31,22 @@ def native_name(payload):
     return None
 
 
-def enabled(state: Path) -> bool:
+def policy_mode(state: Path):
     policy = state / 'hygiene-policy.json'
-    if not policy.exists():
-        return False
+    if not policy.exists() and not policy.is_symlink():
+        return None
     if policy.is_symlink() or not stat.S_ISREG(policy.stat().st_mode) or policy.stat().st_size > 4096:
         raise ValueError('Unsafe hygiene policy')
     body = json.loads(policy.read_text())
-    if body != {'schema': 1, 'mode': 'enforce'}:
+    if (not isinstance(body, dict) or set(body) != {'schema', 'mode'}
+            or type(body.get('schema')) is not int or body['schema'] != 1
+            or body.get('mode') not in ('enforce', 'file-tools')):
         raise ValueError('Unknown hygiene policy; explicit repair required')
-    return True
+    return body['mode']
+
+
+def enabled(state: Path) -> bool:
+    return policy_mode(state) is not None
 
 
 def _command(core, payload):
@@ -75,11 +81,16 @@ def normalize_shell(core, payload):
 
 def run(core, payload, state, delegate):
     """Delegate baseline gates first, then impose the independent hygiene gate."""
-    if not enabled(state):
+    mode = policy_mode(state)
+    if mode is None:
         return delegate()
     event = core._event(payload)
     if event == 'PreToolUse':
         native = native_name(payload)
+        if mode == 'file-tools' and native not in NATIVE_EDIT_TOOLS | NATIVE_SHELL_TOOLS:
+            # Explicitly limited mode: other paths retain baseline behavior.
+            # This is not protection against shell/connector writes.
+            return delegate()
         if native is None or (native in NATIVE_DELEGATION_TOOLS and native not in getattr(core, 'DELEGATION_TOOLS', set())):
             return core._deny(event, 'Strict hygiene: unknown tool or connector has no verified write boundary; no tool executed.')
     event, tool = core._event(payload), core._tool_name(payload)
@@ -148,6 +159,8 @@ def run(core, payload, state, delegate):
         if parsed and parsed[0] == 'error':
             return core._deny(event, parsed[1])
         if parsed:
+            return delegate()
+        if mode == 'file-tools':
             return delegate()
         return core._deny(event, 'Strict hygiene: this shell command has no verified write boundary. Use supported file tools; no command executed.')
     if event == 'PreToolUse' and tool in core.EDIT_TOOLS:

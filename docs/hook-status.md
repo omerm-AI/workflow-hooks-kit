@@ -63,3 +63,19 @@ Global production instructions and hook sources were unchanged by the causal exp
 | Global strict adoption across all projects/sessions | Open | Open | Explicitly disabled. Short single-process checks do not support long builds or child-process test runners; separate adoption acceptance remains required. |
 
 See [safe-check scope and acceptance](acceptance/2026-10-20-safe-check.md).
+
+
+### Explicitly limited native-file mode, 2026-10-20
+
+The operator selected known native save gates with uncovered paths disclosed. This is a narrower deployment contract, not completion of the ten universal requirements above. Strict global mode remains disabled.
+
+| Capability | Codex | Claude Code | Evidence or remaining reason |
+| --- | --- | --- | --- |
+| Limited-mode installation and strict-mode separation | Tested and proven | Tested and proven | Eight focused cases; full suite 247 passes. Exact policy mode, idempotence/coexistence, conflicting flags/mode refusal and malformed/dangling policy failure are covered. |
+| Reviewed eligible PNG cleanup through actual installed commands | Tested and proven | Tested and proven | Exact duplicate archive, Assets transfer and recovery without overwrite, original byte hashes/mtime, referenced media/source refusal. Model-free replay, not native inference. |
+| Marker activation in same live process/thread, plus fresh session | Tested and proven | Tested and proven | Codex: 20 independent checks in three bounded native turns. Claude: 23 checks in the corrected second trial, five forwarded SDK model steps. Same live process/session before/after, actual Old bytes/mtime, cleanup/Assets, next-edit/Stop and fresh-session denial. Initial Claude observer failure remains retained. |
+| Persistent selected-mode activation | Tested and proven | Tested and proven | Both permanent file-tools markers installed only after independent native review, exact eight-source matches, unchanged settings, single owned event handlers and verified watchdog exits. This is adoption by registered callbacks, not installation into arbitrary old processes. |
+| Any arbitrary shell, connector or wrapper write | Open | Open | Explicitly outside file-tools hygiene interception; baseline behavior remains. |
+| Automatic historical cleanup/all helpers and semantic dependency proof | Open | Open | No installation-time sweep. Transfers accept reviewed eligible media/PDF only, bounded literal references cannot prove dynamic/external use, and unresolved files stay in place. |
+
+See [limited-mode acceptance and cleanup boundaries](acceptance/2026-10-20-file-tools.md) and [customer status with installation prompts](hygiene-customer-status.md).
