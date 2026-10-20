@@ -50,7 +50,7 @@ Restore through `workflow-hygiene restore '{"manifest":"Old/YYYY-MM/<unique>/man
 
 ## Deliberate restrictions
 
-Strict mode rejects shell commands without a verified write boundary, including ordinary build or generation commands that may write files. Use supported file tools or a separately reviewed integration. Shell aliases are normalized before both hygiene and the baseline ledger gate. Chained or malformed sentinels are denied. This restriction is real friction and must be evaluated before enabling strict mode on a customer's normal build workflow.
+Strict mode rejects shell commands other than valid intercepted sentinels, including commands conventionally called read-only and ordinary build or generation commands. PATH resolution, shell startup and project configuration can execute code; shell-name heuristics are not a verified write boundary. Use native supported reads/file tools or the bounded intercepted `workflow-hygiene read` sentinel; it returns a real hash and at most 8,000 UTF-8 characters, with optional character offset. Use a separately reviewed integration for commands that require writes. Shell aliases are normalized before both hygiene and the baseline ledger gate. Chained or malformed sentinels are denied. This restriction is real friction and must be evaluated before enabling strict mode on a customer's normal build workflow.
 
 This implementation does not prove interception of arbitrary MCP/connector effects, native paths that omit PreToolUse, external editors, other machines or deliberate same-account tampering. It does not infer that a file is obsolete from age/name, or prove all dynamic/external dependencies. Literal-reference absence is not semantic nonuse. Hosts can impose their own Stop-continuation limits; the kit cannot promise an unbypassable completion boundary beyond the host contract.
 
@@ -63,3 +63,7 @@ See [the native hygiene acceptance record](acceptance/2026-10-20-hygiene.md). Na
 ## Supporting customer instructions
 
 Hebrew instruction payloads are available for [Codex](../prompts/hygiene-codex.he.txt) and [Claude Code](../prompts/hygiene-claude-code.he.txt). They explicitly require an installed, verified executable gate and preserve the open universal-coverage status. These texts alone do not install hooks or create deterministic enforcement.
+
+## Cycle 2 hardening
+
+Pre/Post matchers now cover every delivered tool event. Strict mode uses full native identities and rejects unknown connectors/interpreter wrappers rather than trusting a native-looking suffix. Native read tools remain available. Invalid, oversized or non-object callback input exits 2; receipt failures deny PreToolUse or block Stop. Claude PreToolUse also sets `onFailure: block`. Runtime failure behavior still depends on host support. Installed hook commands explicitly bind HOME to the installation target, including alternate homes. See [cycle 2 acceptance](acceptance/2026-10-20-hygiene-cycle2.md) and [customer installation](customer-install.md).

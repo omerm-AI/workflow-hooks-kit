@@ -228,8 +228,9 @@ class InstallerTests(HomeFixture):
         data = json.loads(self.config('claude').read_text())
         group = data['hooks']['PreToolUse'][0]
         self.assertEqual(group['matcher'], installer.MATCHER)
-        self.assertIn('Agent', group['matcher'])
-        self.assertIn('spawn_agent', group['matcher'])
+        self.assertRegex('Agent', group['matcher'])
+        self.assertRegex('spawn_agent', group['matcher'])
+        self.assertRegex('mcp__unknown__write_file', group['matcher'])
         self.assertEqual(len(data['hooks']['PreToolUse']), 1)
 
     def test_legacy_owned_matcher_migrates_without_duplicate_groups(self):

@@ -18,8 +18,12 @@ import time
 import tempfile
 from typing import Any
 
-import session_workflow_hook as workflow
-import delegation_gate
+try:
+    import session_workflow_hook as workflow
+    import delegation_gate
+except Exception:
+    sys.stderr.write("Hook dependency unavailable; action not authorized.\n")
+    raise SystemExit(2)
 
 MAX_INPUT = 1_000_000
 MAX_BODY = 32_768
@@ -965,12 +969,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT + 1)
         if len(raw) > MAX_INPUT:
-            result = {"systemMessage": "Tool scope hook input exceeds limit (fail-open)."}
+            raise ValueError("input exceeds limit")
         else:
             payload = json.loads(raw.decode("utf-8"))
-            result = run(payload, claude=args.claude) if isinstance(payload, dict) else {}
+            if not isinstance(payload, dict):
+                raise ValueError("input must be an object")
+            result = run(payload, claude=args.claude)
     except Exception as exc:
-        result = {"systemMessage": f"Tool scope hook input error (fail-open): {type(exc).__name__}: {exc}"}
+        sys.stderr.write(f"Hook input rejected: {type(exc).__name__}; action not authorized.\n")
+        return 2
     if isinstance(payload, dict):
         event, tool = _event(payload), _tool_name(payload)
         if tool in {"exec_command", "shell_command"}:
@@ -991,8 +998,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr.write(f"Native hook receipt unavailable: {type(exc).__name__}.\n")
             denied = (isinstance(result, dict) and isinstance(result.get("hookSpecificOutput"), dict)
                       and result["hookSpecificOutput"].get("permissionDecision") == "deny")
-            if event == "PreToolUse" and tool in EDIT_TOOLS | {"Bash"} and not denied:
+            if event == "PreToolUse" and not denied:
                 result = _deny("PreToolUse", f"Hook receipt unavailable: {type(exc).__name__}; operation denied.")
+            elif event == "Stop":
+                result = {"decision": "block", "reason": "Hook receipt unavailable; completion not verified."}
     sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
     return 0
 

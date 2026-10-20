@@ -2,6 +2,10 @@
 
 Version 0.1.0. Portable local planning, scope and verification checkpoints for Codex and Claude Code. Python 3.9+ on macOS/Linux; no third-party Python dependencies, model calls or installer network access.
 
+## Customer bootstrap prompts
+
+Start with the [step-by-step customer guide](docs/customer-install.md), or give your agent the [Codex install prompt](prompts/install-hygiene-codex.he.txt) / [Claude Code install prompt](prompts/install-hygiene-claude-code.he.txt). These install the reviewed opt-in preview rather than relying on memory. Installation does not retroactively reorganize projects; protection applies to future covered work in new or existing folders. Read the strict shell restrictions before activation.
+
 ## Install
 
 Start with [platform-specific download and installation steps](docs/installation.md).

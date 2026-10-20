@@ -120,8 +120,8 @@ class NativeReceiptTests(unittest.TestCase):
         runtime.mkdir(parents=True)
         for name in ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py', 'hygiene_guard.py', 'hygiene_adapter.py'):
             shutil.copyfile(SCRIPTS / name, runtime / name)
-        expected = 'python3 -B ' + shlex.quote(str(runtime / 'tool_scope_hook.py')) + ' --claude'
-        match = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'
+        expected = 'env HOME=' + shlex.quote(str(home)) + ' python3 -B ' + shlex.quote(str(runtime / 'tool_scope_hook.py')) + ' --claude'
+        match = plugin_adapter.MATCHER
         hooks = {}
         for event in ('UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'):
             matcher = match if event in {'PreToolUse', 'PostToolUse'} else None

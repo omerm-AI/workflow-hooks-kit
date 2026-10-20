@@ -6,10 +6,29 @@ change the protected project root. Review declarations are not semantic proof.
 """
 from __future__ import annotations
 import json
+import hashlib
+import os
 from pathlib import Path
 import shlex
 import stat
 import hygiene_guard
+
+# Complete native identities only; connector suffixes are never a capability.
+NATIVE_READ_TOOLS = {'Read', 'Glob', 'Grep', 'LS', 'List'}
+NATIVE_EDIT_TOOLS = {'Edit', 'Write', 'apply_patch', 'MultiEdit', 'NotebookEdit'}
+NATIVE_DELEGATION_TOOLS = {'Agent', 'spawn_agent', 'Task'}
+NATIVE_METADATA_TOOLS = {'update_plan', 'request_user_input', 'AskUserQuestion', 'TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'}
+NATIVE_SHELL_TOOLS = {'Bash', 'exec_command', 'shell_command'}
+
+
+def native_name(payload):
+    raw = payload.get('tool_name') or payload.get('name') or ''
+    names = NATIVE_READ_TOOLS | NATIVE_EDIT_TOOLS | NATIVE_DELEGATION_TOOLS | NATIVE_METADATA_TOOLS | NATIVE_SHELL_TOOLS
+    if raw in names:
+        return raw
+    if isinstance(raw, str) and raw.startswith('functions.') and raw[10:] in names:
+        return raw[10:]
+    return None
 
 
 def enabled(state: Path) -> bool:
@@ -36,8 +55,8 @@ def _command(core, payload):
         return None
     if not args or args[0] != 'workflow-hygiene':
         return None
-    if len(args) != 3 or args[1] not in {'review', 'restore', 'inspect'}:
-        raise ValueError("Use exactly workflow-hygiene inspect|review|restore '<JSON>'")
+    if len(args) != 3 or args[1] not in {'review', 'restore', 'inspect', 'read'}:
+        raise ValueError("Use exactly workflow-hygiene inspect|read|review|restore '<JSON>'")
     body = json.loads(args[2])
     if not isinstance(body, dict):
         raise ValueError('Review must be an object')
@@ -45,7 +64,7 @@ def _command(core, payload):
 
 
 def normalize_shell(core, payload):
-    tool = core._tool_name(payload)
+    tool = native_name(payload)
     if tool in {'exec_command', 'shell_command'}:
         data = dict(core._input(payload))
         if 'command' not in data and isinstance(data.get('cmd'), str):
@@ -58,6 +77,11 @@ def run(core, payload, state, delegate):
     """Delegate baseline gates first, then impose the independent hygiene gate."""
     if not enabled(state):
         return delegate()
+    event = core._event(payload)
+    if event == 'PreToolUse':
+        native = native_name(payload)
+        if native is None or (native in NATIVE_DELEGATION_TOOLS and native not in getattr(core, 'DELEGATION_TOOLS', set())):
+            return core._deny(event, 'Strict hygiene: unknown tool or connector has no verified write boundary; no tool executed.')
     event, tool = core._event(payload), core._tool_name(payload)
     payload = normalize_shell(core, payload)
     tool = core._tool_name(payload)
@@ -69,6 +93,32 @@ def run(core, payload, state, delegate):
             ok, actual, root = core._protected_scope(payload, state)
             if not ok:
                 return core._deny(event, actual)
+            if action == 'read':
+                if set(body) - {'path', 'offset', 'limit'} or 'path' not in body:
+                    raise ValueError('Read requires path and optional offset/limit')
+                offset, limit = body.get('offset', 0), body.get('limit', 8000)
+                if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 8000:
+                    raise ValueError('Read offset/limit invalid')
+                protected, _sid, _turn = hygiene_guard._identity({**payload, 'cwd': root})
+                rel = hygiene_guard._rel(protected, body['path'])
+                inspected = hygiene_guard._file(protected, rel)
+                if inspected is None:
+                    raise ValueError('Read target absent')
+                fd = os.open(str(protected / rel), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, 'rb') as stream:
+                    actual = os.fstat(stream.fileno())
+                    signature = [actual.st_dev, actual.st_ino, actual.st_size, actual.st_mtime_ns, actual.st_ctime_ns]
+                    if not stat.S_ISREG(actual.st_mode) or signature != inspected['signature']:
+                        raise ValueError('Read target identity changed')
+                    data = stream.read(hygiene_guard.MAX_FILE_BYTES + 1)
+                if len(data) > hygiene_guard.MAX_FILE_BYTES or hygiene_guard._file(protected, rel) != inspected:
+                    raise ValueError('Read target changed or exceeded bound')
+                if hashlib.sha256(data).hexdigest() != inspected['sha256']:
+                    raise ValueError('Read target changed during inspection')
+                content = data.decode('utf-8')
+                return core._deny(event, json.dumps({'path': rel, 'sha256': inspected['sha256'],
+                    'offset': offset, 'next_offset': min(offset + limit, len(content)),
+                    'total_characters': len(content), 'text': content[offset:offset + limit]}, ensure_ascii=False))
             if action == 'inspect':
                 paths = body.get('paths')
                 if set(body) != {'paths'} or not isinstance(paths, list) or not 1 <= len(paths) <= 8:
@@ -91,7 +141,7 @@ def run(core, payload, state, delegate):
         parsed = core._parse_ledger_command(command)
         if parsed and parsed[0] == 'error':
             return core._deny(event, parsed[1])
-        if parsed or core._readonly_bash(command):
+        if parsed:
             return delegate()
         return core._deny(event, 'Strict hygiene: this shell command has no verified write boundary. Use supported file tools; no command executed.')
     if event == 'PreToolUse' and tool in core.EDIT_TOOLS:

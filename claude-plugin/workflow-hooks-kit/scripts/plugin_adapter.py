@@ -5,11 +5,15 @@ import json
 from pathlib import Path
 import shlex
 import sys
-import tool_scope_hook as core
+try:
+    import tool_scope_hook as core
+except Exception:
+    sys.stderr.write('Hook dependency unavailable; action not authorized.\n')
+    raise SystemExit(2)
 
 EVENTS = {'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop'}
 ROOT = Path(__file__).resolve().parent.parent
-MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'
+MATCHER = '.*'
 
 
 def global_adapter_active(home: Path) -> bool:
@@ -18,7 +22,7 @@ def global_adapter_active(home: Path) -> bool:
         if data.get('disableAllHooks') is True:
             return False
         script = home / '.claude/workflow-hooks-kit/bin/tool_scope_hook.py'
-        expected = 'python3 -B ' + shlex.quote(str(script)) + ' --claude'
+        expected = 'env HOME=' + shlex.quote(str(home)) + ' python3 -B ' + shlex.quote(str(script)) + ' --claude'
         for event in EVENTS:
             matcher = MATCHER if event in {'PreToolUse', 'PostToolUse'} else None
             if not any(group.get('matcher') == matcher and any(h.get('command') == expected for h in group.get('hooks', [])) for group in data.get('hooks', {}).get(event, [])):
@@ -48,13 +52,17 @@ def run(payload: dict) -> dict:
     return _run(payload, deduplicated)
 
 
-def main() -> None:
+def main() -> int:
     payload = None
     deduplicated = None
     handler_failed = False
     try:
         raw = sys.stdin.buffer.read(core.MAX_INPUT + 1)
-        payload = json.loads(raw) if len(raw) <= core.MAX_INPUT else None
+        if len(raw) > core.MAX_INPUT:
+            raise ValueError('input exceeds limit')
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise ValueError('input must be an object')
         if isinstance(payload, dict):
             deduplicated = payload.get('hook_event_name') == 'SessionStart' or global_adapter_active(Path.home())
             result = _run(payload, deduplicated)
@@ -62,7 +70,11 @@ def main() -> None:
             result = {}
     except Exception as exc:
         handler_failed = True
-        result = {'systemMessage': f'Workflow plugin input error (fail-open): {type(exc).__name__}.'}
+        if not isinstance(payload, dict):
+            sys.stderr.write(f'Hook input rejected: {type(exc).__name__}; action not authorized.\n')
+            return 2
+        event = core._event(payload)
+        result = core._deny(event, 'Workflow plugin validation failed; action not authorized.') if event == 'PreToolUse' else ({'decision': 'block', 'reason': 'Workflow plugin validation failed.'} if event == 'Stop' else {'systemMessage': 'Workflow plugin validation failed.'})
     if isinstance(payload, dict):
         event, tool = core._event(payload), core._tool_name(payload)
         if tool in {"exec_command", "shell_command"}:
@@ -87,10 +99,13 @@ def main() -> None:
             sys.stderr.write(f'Native hook receipt unavailable: {type(exc).__name__}.\n')
             denied = (isinstance(result, dict) and isinstance(result.get('hookSpecificOutput'), dict)
                       and result['hookSpecificOutput'].get('permissionDecision') == 'deny')
-            if event == 'PreToolUse' and tool in core.EDIT_TOOLS | {'Bash'} and not denied:
+            if event == 'PreToolUse' and not denied:
                 result = core._deny('PreToolUse', f'Hook receipt unavailable: {type(exc).__name__}; operation denied.')
+            elif event == 'Stop':
+                result = {'decision': 'block', 'reason': 'Hook receipt unavailable; completion not verified.'}
     print(json.dumps(result, ensure_ascii=False))
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

@@ -17,19 +17,21 @@ import os
 
 EVENTS = ('UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop')
 SOURCE = Path(__file__).resolve().parent / 'claude-plugin/workflow-hooks-kit'
-MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'
-LEGACY_MATCHERS = {'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit'}
+MATCHER = '.*'
+LEGACY_MATCHERS = {'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit', 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'}
 LEARNING = Path(__file__).resolve().parent / 'learning'
 MAX_CONFIG = 4_000_000
 
 
 def command(home: Path, platform: str) -> str:
     script = home / ('.codex' if platform == 'codex' else '.claude') / 'workflow-hooks-kit/bin/tool_scope_hook.py'
-    return 'python3 -B ' + shlex.quote(str(script)) + (' --claude' if platform == 'claude' else '')
+    return 'env HOME=' + shlex.quote(str(home)) + ' python3 -B ' + shlex.quote(str(script)) + (' --claude' if platform == 'claude' else '')
 
 
 def entry(home: Path, platform: str, event: str) -> dict:
     hook = {'type': 'command', 'command': command(home, platform), 'timeout': 10}
+    if platform == 'claude' and event == 'PreToolUse':
+        hook['onFailure'] = 'block'
     if platform == 'codex' and event == 'UserPromptSubmit':
         hook['additionalContextLimit'] = 300
     group = {'hooks': [hook]}
@@ -269,7 +271,10 @@ def _operate_locked(home, platform, uninstall, target, kit, mcp=None, *, hygiene
         exact = expected['hooks'][0]
         current = hooks.get(event, [])
         owner = owned.get(event)
-        if owner and (owner['hook'] != exact or owner.get('matcher') not in (expected.get('matcher'), *LEGACY_MATCHERS)):
+        legacy_hook = {key: value for key, value in exact.items() if key != 'onFailure'}
+        prior_command = exact['command'].removeprefix('env HOME=' + shlex.quote(str(home)) + ' ')
+        previous_hook = {**legacy_hook, 'command': prior_command}
+        if owner and (owner['hook'] not in (exact, legacy_hook, previous_hook) or owner.get('matcher') not in (expected.get('matcher'), *LEGACY_MATCHERS)):
             raise ValueError('Receipt does not describe this installer command and matcher.')
         groups = []
         removed = False

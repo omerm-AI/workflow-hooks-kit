@@ -32,7 +32,7 @@ class DelegationGuardTests(unittest.TestCase):
             'CLAUDE_STATE = Path.home() / ".claude" / "workflow-hooks-kit"',
             f'CLAUDE_STATE = Path({str(self.home / ".claude/workflow-hooks-kit")!r})', 1)
         legacy_routes = (
-            'import delegation_gate\n',
+            '    import delegation_gate\n',
             'DELEGATION_TOOLS = delegation_gate.DELEGATION_TOOLS\n',
             '    if tool in DELEGATION_TOOLS:\n        return delegation_gate.check(sys.modules[__name__], p, state)\n',
             '        if _tool_name(payload) in DELEGATION_TOOLS and _event(payload) == "PreToolUse":\n'
@@ -41,6 +41,7 @@ class DelegationGuardTests(unittest.TestCase):
         for route in legacy_routes:
             self.assertIn(route, core_source)
             core_source = core_source.replace(route, '', 1)
+        compile(core_source, 'legacy-core-fixture', 'exec')
         (self.core_dir / 'tool_scope_hook.py').write_text(core_source)
         workflow_source = (sources / 'session_workflow_hook.py').read_text()
         workflow_source = workflow_source.replace(
