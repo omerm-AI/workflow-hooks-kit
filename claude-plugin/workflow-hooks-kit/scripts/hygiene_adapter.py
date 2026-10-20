@@ -55,8 +55,8 @@ def _command(core, payload):
         return None
     if not args or args[0] != 'workflow-hygiene':
         return None
-    if len(args) != 3 or args[1] not in {'review', 'restore', 'inspect', 'read'}:
-        raise ValueError("Use exactly workflow-hygiene inspect|read|review|restore '<JSON>'")
+    if len(args) != 3 or args[1] not in {'review', 'restore', 'inspect', 'read', 'check'}:
+        raise ValueError("Use exactly workflow-hygiene inspect|read|review|restore|check '<JSON>'")
     body = json.loads(args[2])
     if not isinstance(body, dict):
         raise ValueError('Review must be an object')
@@ -93,6 +93,12 @@ def run(core, payload, state, delegate):
             ok, actual, root = core._protected_scope(payload, state)
             if not ok:
                 return core._deny(event, actual)
+            if action == 'check':
+                import hygiene_check
+                result = hygiene_check.run(Path(root), body)
+                # This is process evidence only. It never approves pending hygiene or QA.
+                return core._deny(event, json.dumps({'safe_check': result}, ensure_ascii=False)
+                                  + ' No ordinary shell command executed; workflow QA remains separate.')
             if action == 'read':
                 if set(body) - {'path', 'offset', 'limit'} or 'path' not in body:
                     raise ValueError('Read requires path and optional offset/limit')

@@ -27,7 +27,7 @@ def global_adapter_active(home: Path) -> bool:
             matcher = MATCHER if event in {'PreToolUse', 'PostToolUse'} else None
             if not any(group.get('matcher') == matcher and any(h.get('command') == expected for h in group.get('hooks', [])) for group in data.get('hooks', {}).get(event, [])):
                 return False
-        runtime_sources = ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py', 'hygiene_guard.py', 'hygiene_adapter.py')
+        runtime_sources = ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py', 'hygiene_guard.py', 'hygiene_adapter.py', 'hygiene_check.py')
         return all((script.parent / name).read_bytes() == (ROOT / 'scripts' / name).read_bytes()
                    for name in runtime_sources)
     except (OSError, ValueError, TypeError, AttributeError):
@@ -83,6 +83,7 @@ def main() -> int:
         components = (
             Path(__file__), Path(core.__file__), Path(core.workflow.__file__), Path(__file__).with_name("hygiene_guard.py"),
             Path(__file__).with_name("hygiene_adapter.py"),
+            Path(__file__).with_name("hygiene_check.py"),
         )
         try:
             import native_receipt

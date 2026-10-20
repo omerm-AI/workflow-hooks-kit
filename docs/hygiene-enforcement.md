@@ -67,3 +67,7 @@ Hebrew instruction payloads are available for [Codex](../prompts/hygiene-codex.h
 ## Cycle 2 hardening
 
 Pre/Post matchers now cover every delivered tool event. Strict mode uses full native identities and rejects unknown connectors/interpreter wrappers rather than trusting a native-looking suffix. Native read tools remain available. Invalid, oversized or non-object callback input exits 2; receipt failures deny PreToolUse or block Stop. Claude PreToolUse also sets `onFailure: block`. Runtime failure behavior still depends on host support. Installed hook commands explicitly bind HOME to the installation target, including alternate homes. See [cycle 2 acceptance](acceptance/2026-10-20-hygiene-cycle2.md) and [customer installation](customer-install.md).
+
+## Safe test execution boundary
+
+The macOS-only `workflow-hygiene check` sentinel supplies a bounded single-process read-only-project execution path. The kernel denies project/outside writes, fork/spawn, network and private data reads outside approved roots; only private scratch writes are permitted. It does not authorize ordinary shell commands or replace review/QA. Maximum 3 seconds including confinement preflight, 8192 bytes output; no accepted backend means no execution. Builds requiring children/project writes remain unsupported. Global activation requires separate evidence. See [the measured acceptance](acceptance/2026-10-20-safe-check.md).

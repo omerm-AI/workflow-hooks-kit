@@ -990,6 +990,7 @@ def main(argv: list[str] | None = None) -> int:
                 Path(__file__), Path(workflow.__file__), Path(__file__).with_name("hook_receipt.py"),
                 Path(native_receipt.__file__), Path(__file__).with_name("hygiene_guard.py"),
                 Path(__file__).with_name("hygiene_adapter.py"),
+                Path(__file__).with_name("hygiene_check.py"),
             )
             handler = "tool-scope-claude-v1" if args.claude else "tool-scope-codex-v1"
             version = native_receipt.handler_version(handler, components)

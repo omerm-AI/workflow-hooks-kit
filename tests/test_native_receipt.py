@@ -19,12 +19,14 @@ import plugin_adapter
 
 def core_components():
     return (CORE_SCRIPT, SCRIPTS / 'session_workflow_hook.py', SCRIPTS / 'hook_receipt.py',
-            SCRIPTS / 'native_receipt.py', SCRIPTS / 'hygiene_guard.py', SCRIPTS / 'hygiene_adapter.py')
+            SCRIPTS / 'native_receipt.py', SCRIPTS / 'hygiene_guard.py', SCRIPTS / 'hygiene_adapter.py',
+            SCRIPTS / 'hygiene_check.py')
 
 
 def plugin_components():
     return (PLUGIN_SCRIPT, CORE_SCRIPT, SCRIPTS / 'session_workflow_hook.py',
             SCRIPTS / 'hygiene_guard.py', SCRIPTS / 'hygiene_adapter.py',
+            SCRIPTS / 'hygiene_check.py',
             SCRIPTS / 'hook_receipt.py', SCRIPTS / 'native_receipt.py')
 
 
@@ -118,7 +120,7 @@ class NativeReceiptTests(unittest.TestCase):
         home = self.home
         runtime = home / '.claude/workflow-hooks-kit/bin'
         runtime.mkdir(parents=True)
-        for name in ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py', 'hygiene_guard.py', 'hygiene_adapter.py'):
+        for name in ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py', 'hygiene_guard.py', 'hygiene_adapter.py', 'hygiene_check.py'):
             shutil.copyfile(SCRIPTS / name, runtime / name)
         expected = 'env HOME=' + shlex.quote(str(home)) + ' python3 -B ' + shlex.quote(str(runtime / 'tool_scope_hook.py')) + ' --claude'
         match = plugin_adapter.MATCHER

@@ -102,6 +102,17 @@ def exercise(home, platform):
         assert denied(call('PreToolUse', 'Write', {'file_path': str(project / 'next.txt'), 'content': 'No'}))
         assert not (project / 'next.txt').exists()
         assert call('Stop').get('decision') == 'block'
+        if sys.platform == 'darwin':
+            def safe_check(code):
+                result = sentinel('workflow-hygiene', 'check', {
+                    'argv': [str(Path(sys.executable).resolve()), '-B', '-c', code], 'timeout': 3})
+                assert denied(result)
+                message = result['hookSpecificOutput']['permissionDecisionReason']
+                return json.JSONDecoder().raw_decode(message)[0]['safe_check']
+            assert safe_check("from pathlib import Path; assert Path('current.txt').read_text() == 'Updated fixture bytes\\n'")['status'] == 'passed'
+            assert call('Stop').get('decision') == 'block', 'A safe check must not approve pending post-edit review or QA'
+            assert safe_check("open('current.txt', 'w').write('wrong')")['status'] == 'failed'
+            assert target.read_text() == 'Updated fixture bytes\n'
         for tool in ('mcp__filesystem__write_file', 'mcp.fake.exec_command', 'functions.exec', 'write_stdin'):
             assert denied(call('PreToolUse', tool, {'path': 'next.txt', 'cmd': 'touch next.txt'}))
         for command in ('pwd', 'git status', 'touch next.txt'):
