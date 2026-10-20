@@ -1,5 +1,7 @@
 # Workflow Hooks Kit
 
+> Strict hygiene preview: [step-by-step installation](https://github.com/omerm-AI/workflow-hooks-kit/blob/hygiene-preview-2026-10-20/docs/customer-install.md), [Codex bootstrap prompt](https://github.com/omerm-AI/workflow-hooks-kit/blob/hygiene-preview-2026-10-20/prompts/install-hygiene-codex.he.txt), and [Claude Code bootstrap prompt](https://github.com/omerm-AI/workflow-hooks-kit/blob/hygiene-preview-2026-10-20/prompts/install-hygiene-claude-code.he.txt). Use the immutable `hygiene-preview-2026-10-20` tag, not this base branch, for that opt-in feature. The preview is qualified by its acceptance report; universal global rollout remains Open. Installation does not retroactively reorganize project files.
+
 Version 0.1.0. Portable local planning, scope and verification checkpoints for Codex and Claude Code. Python 3.9+ on macOS/Linux; no third-party Python dependencies, model calls or installer network access.
 
 ## Install
