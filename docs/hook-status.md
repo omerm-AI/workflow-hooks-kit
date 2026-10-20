@@ -31,6 +31,9 @@ For every **Open** entry in ordinary ChatGPT or hosted Cowork, the common reason
 
 | 21 | Parent hygiene trial without observed user/work instructions | Open | Tested and proven | Open | Open | Claude cycle2 observed empty instruction-file, submission-context, skill and MCP inventories; optional user-email block removed; unchanged vendor safety/system sections and engine attachments retained and inventoried. Hidden universal context absence is not claimed. Codex corrected write trials lack equivalent OS source isolation. |
 
+| 22 | Fresh public-clone installed-command smoke | Tested and proven | Tested and proven | Open | Open | Immutable preview fetched over HTTPS; actual recorded hook commands, separate caller HOME, four fresh/populated project cases, foreign settings/idempotence and recovery-preserving uninstall; zero model calls. This is not native inference. |
+| 23 | Native callback from actual first-time installed preview | Open | Tested and proven | Open | Open | Claude actual recorded installer command denied unreviewed Write, target absent, three native-ID/source-bound main receipts, one subscription request. Test-only UPS plan prepared, no hygiene review. Codex fresh-profile hooks discovered, but subscription login/trust and native canary remain Open. |
+
 ## Evidence and next missing checks
 
 - [Controlled Claude Code Write experiment](acceptance/2026-10-18-claude-write-causality.md): check 15 is proven for the stated boundary. The test retained vendor instructions, measured empty user instruction files, capped inference after actual tool results and verified native prompt/session-bound signatures.
@@ -46,3 +49,5 @@ For every **Open** entry in ordinary ChatGPT or hosted Cowork, the common reason
 Global production instructions and hook sources were unchanged by the causal experiment. The observer and diagnostic witnesses belonged only to the disposable test. They are not new production hooks or additional recurring model calls.
 
 - [Cycle 2 hygiene hardening](acceptance/2026-10-20-hygiene-cycle2.md): native Claude overwrite/next-edit proof, strict unknown-tool and input gates, alternate-home installation regression and customer preview smoke.
+
+- [Fresh first-time installation](acceptance/2026-10-20-first-install.md): remote clone, actual recorded-command smoke, native installed Claude command, and explicit Codex login/trust prerequisites. Operator sources/matchers are staged with strict global policy disabled pending trust and the explicit build-workflow choice.

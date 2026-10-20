@@ -53,7 +53,16 @@ claude --restricted --settings /absolute/new/claude-native-home/.claude/settings
 
 This invocation is an **Open** prerequisite until the current preview's installed hook commands are verified to honor the target `HOME` and an actual native canary produces matching callbacks and file behavior. Do not mark it passed from the command or config alone.
 
-For **Codex**, use only a client-supported isolated profile that loads the second home's hook settings, then complete trust review in native `/hooks` for those exact definitions. The isolated-profile launch and trust flow are **Open** until demonstrated with actual callbacks and file behavior. Do not invent profile flags or trust hashes. If the host cannot provide a supported isolated staging flow, report the prerequisite and stop before installing to the real account.
+For **Codex**, the explicit `CODEX_HOME` profile below was checked without inference: the native server discovered all four hooks from the second home's `hooks.json`. The new profile was logged out and its hooks untrusted. Existing account credentials are not copied or silently reused:
+
+```sh
+CODEX_HOME=/absolute/new/codex-native-home/.codex codex login status
+# If logged out, ask the user to finish the normal subscription login:
+CODEX_HOME=/absolute/new/codex-native-home/.codex codex login
+CODEX_HOME=/absolute/new/codex-native-home/.codex codex -C /path/to/disposable-project
+```
+
+Inside that profile, open `/hooks` and ask the user to trust the four reviewed definitions. Do not use API-key login, copy credential files, forge trust records or start inference while logged out/untrusted. Then run the controlled file canary. Profile discovery is **Tested and proven**; the fresh-profile native canary remains **Open** until login, trust and actual callbacks are evidenced. The operator's existing Codex account is a different profile and cannot substitute for this fresh-profile proof.
 
 Check relevant managed and project-level settings for overrides. A fresh canary must observe the actual hook callback and file result. Do not assume already-open sessions adopt new settings; test that separately or report it **Open**. Do not proceed to the real account while the selected platform's native prerequisite remains **Open**.
 
@@ -90,3 +99,7 @@ The guard cannot cover unknown MCP/connector effects, external editors, other ma
 Report the tested preview commit, smoke output, second-home installer result, native trust/canary evidence, whether the real account was installed, and any untested boundaries. Use **Tested and proven** only for measured outcomes and **Open** for unresolved ones. Global adoption across projects, sessions, and tool paths remains **Open**.
 
 See [strict hygiene contract and limits](hygiene-enforcement.md), [binary hook acceptance status](hook-status.md), and [native hygiene acceptance](acceptance/2026-10-20-hygiene.md).
+
+## Measured first-time installation
+
+The immutable preview was cloned over public HTTPS into a fresh checkout and its commit matched the remote tag. All four installed-command smoke cases passed without model calls. Claude Code then executed the unchanged recorded installer command in a fresh staging home, denied an actual unreviewed Write and emitted matching source-bound native receipts using one subscription request. A disclosed test-only UPS prepared the baseline plan but supplied no hygiene review. Codex fresh-profile discovery passed; login/trust remain prerequisites for its native test. See [first-install record](acceptance/2026-10-20-first-install.md).
