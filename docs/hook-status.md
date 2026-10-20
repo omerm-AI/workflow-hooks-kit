@@ -50,7 +50,7 @@ Global production instructions and hook sources were unchanged by the causal exp
 
 - [Cycle 2 hygiene hardening](acceptance/2026-10-20-hygiene-cycle2.md): native Claude overwrite/next-edit proof, strict unknown-tool and input gates, alternate-home installation regression and customer preview smoke.
 
-- [Fresh first-time installation](acceptance/2026-10-20-first-install.md): remote clone, actual recorded-command smoke, native installed Claude command, and explicit Codex login/trust prerequisites. Operator sources/matchers are staged with strict global policy disabled pending trust and the explicit build-workflow choice.
+- [Fresh first-time installation](acceptance/2026-10-20-first-install.md): remote clone, actual recorded-command smoke, native installed Claude command, and explicit Codex login/trust prerequisites. Operator sources/matchers are staged and Codex trust is verified. Strict global policy remains disabled; bounded safe-check native acceptance is recorded below, separately from global adoption.
 
 ### Bounded safe-check preview, 2026-10-20
 
@@ -59,7 +59,7 @@ Global production instructions and hook sources were unchanged by the causal exp
 | Actual installed-command safe check on macOS | Tested and proven | Tested and proven | Both recorded installer commands ran a valid read-only check, refused project overwrite and retained pending QA Stop. No model calls; installed-command replay, not native inference. |
 | Kernel file/network/child boundaries and timeout/output limits | Tested and proven | Tested and proven | Shared runner passed 14 independent actual-kernel cases; the both-host installed case is the fifteenth. Complete suite: 238 tests pass. |
 | Codex updated scope-hook trust | Tested and proven | Open | Codex native hooks/list confirmed both definitions trusted without inference; this check does not apply to Claude. |
-| New safe check through an actual native session | Tested and proven | Open | Codex actual native safe check returned the exact marker; subsequent apply_patch was blocked for missing preflight and target stayed absent. Two signed source-bound receipts independently verified. Claude actual installed callback refused nested Seatbelt under the test harness; this is not a passing native check. |
+| New safe check through an actual native session | Tested and proven | Tested and proven | Codex returned the exact marker, then blocked apply_patch for missing preflight; two signed receipts independently verified. Claude passed all 17 frozen checks in one separately approved subscription request: unchanged installed command, exact confined-process marker, three verified source/native-ID-bound callbacks, empty observed work instructions and unchanged vendor sections. Earlier nested-harness refusal is retained as a negative control. This is staging acceptance, not global adoption. |
 | Global strict adoption across all projects/sessions | Open | Open | Explicitly disabled. Short single-process checks do not support long builds or child-process test runners; separate adoption acceptance remains required. |
 
 See [safe-check scope and acceptance](acceptance/2026-10-20-safe-check.md).
