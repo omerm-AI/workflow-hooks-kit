@@ -902,7 +902,7 @@ def _post(p: dict[str, Any], state: Path) -> dict[str, Any]:
     return {}
 
 
-def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
+def _baseline_run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
     """Run one hook event. Claude uses its own state namespace and prompt_id turn key."""
     original_state = workflow.STATE
     try:
@@ -938,6 +938,25 @@ def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
         workflow.STATE = original_state
 
 
+def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
+    # Hygiene is operator-enabled and leaves existing contracts unchanged otherwise.
+    state = CLAUDE_STATE if claude else workflow.STATE
+    normalized = dict(payload)
+    if claude and not normalized.get("turn_id") and normalized.get("prompt_id"):
+        normalized["turn_id"] = normalized["prompt_id"]
+    try:
+        import hygiene_adapter
+        normalized = hygiene_adapter.normalize_shell(sys.modules[__name__], normalized)
+        return hygiene_adapter.run(sys.modules[__name__], normalized, state,
+                                   lambda: _baseline_run(normalized, claude=claude))
+    except Exception as exc:
+        if _event(payload) == "Stop":
+            return {"decision": "block", "reason": "Hygiene validation unavailable: " + type(exc).__name__}
+        if _event(payload) == "PreToolUse":
+            return _deny("PreToolUse", "Hygiene validation unavailable: " + type(exc).__name__)
+        return {"systemMessage": "Hygiene validation unavailable: " + type(exc).__name__}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--claude", action="store_true")
@@ -954,13 +973,16 @@ def main(argv: list[str] | None = None) -> int:
         result = {"systemMessage": f"Tool scope hook input error (fail-open): {type(exc).__name__}: {exc}"}
     if isinstance(payload, dict):
         event, tool = _event(payload), _tool_name(payload)
+        if tool in {"exec_command", "shell_command"}:
+            tool = "Bash"
         receipt_root = CLAUDE_STATE if args.claude else workflow.STATE.parent
         receipt_state = receipt_root / "hook-receipts" / "tool-scope"
         try:
             import native_receipt
             components = (
                 Path(__file__), Path(workflow.__file__), Path(__file__).with_name("hook_receipt.py"),
-                Path(native_receipt.__file__),
+                Path(native_receipt.__file__), Path(__file__).with_name("hygiene_guard.py"),
+                Path(__file__).with_name("hygiene_adapter.py"),
             )
             handler = "tool-scope-claude-v1" if args.claude else "tool-scope-codex-v1"
             version = native_receipt.handler_version(handler, components)

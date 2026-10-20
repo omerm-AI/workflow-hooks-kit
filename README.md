@@ -62,3 +62,7 @@ python3 -B -m unittest discover -s tests -v
 Tests use temporary homes under your home directory (the core intentionally rejects `/tmp` as a project root), preserve unrelated settings, and never touch live host configuration. For learning tests, run the documented command in that module. No binary artifact needs to be tracked in Git.
 
 [The stage request validator](docs/delegation-binding.md) mechanically binds a canonical DoD packet and requested model to a frozen stage. It is not yet connected to a native enforcement handler. A separate native input-rewrite sample establishes a possible delivery path, without certifying full routing or QA enforcement.
+
+## Strict hygiene candidate
+
+An explicit `--hygiene-enforcement` option adds supported-file preflight, verified prior-byte backups, post-edit review gates and conservative reversible transfers. Native guard tests have observed Write/patch then Stop blocks in disconnected fresh/existing project fixtures. This does **not** certify universal customer rollout or interception of every native/MCP/shell path. Strict mode rejects unverified shell writes and may prevent ordinary builds. Read [the contract and limits](docs/hygiene-enforcement.md) and [acceptance evidence](docs/acceptance/2026-10-20-hygiene.md) before opting in. Existing installations are not silently enabled.

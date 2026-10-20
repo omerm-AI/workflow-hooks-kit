@@ -226,7 +226,7 @@ def apply_mcp(plan, backup_dir, stamp):
     write_json(plan['receipt'], {'owned': plan['owned'], 'original_had_servers': plan['original_had_servers']})
 
 
-def operate(home: Path, platform: str, uninstall: bool = False, *, learning_mcp=False, state_dir=None, policy_root=None) -> dict:
+def operate(home: Path, platform: str, uninstall: bool = False, *, learning_mcp=False, state_dir=None, policy_root=None, hygiene_enforcement=False) -> dict:
     base = home / ('.codex' if platform == 'codex' else '.claude')
     target = base / ('hooks.json' if platform == 'codex' else 'settings.json')
     kit = base / 'workflow-hooks-kit'
@@ -243,11 +243,19 @@ def operate(home: Path, platform: str, uninstall: bool = False, *, learning_mcp=
                 if not policy_root.is_dir():
                     raise ValueError('Policy root must already exist.')
         plan = mcp_plan(home, platform, kit, uninstall, state_dir, policy_root) if learning_mcp or (uninstall and (kit / 'mcp-install-receipt.json').exists()) else None
-        return _operate_locked(home, platform, uninstall, target, kit, plan)
+        return _operate_locked(home, platform, uninstall, target, kit, plan, hygiene_enforcement=hygiene_enforcement)
 
 
-def _operate_locked(home, platform, uninstall, target, kit, mcp=None):
+def _operate_locked(home, platform, uninstall, target, kit, mcp=None, *, hygiene_enforcement=False):
     data = read_config(target)
+    if hygiene_enforcement and not uninstall:
+        hygiene_state = kit / 'state' if platform == 'codex' else kit
+        safe_path(hygiene_state, True)
+        if hygiene_state.exists() and hygiene_state.stat().st_mode & 0o077:
+            raise ValueError('Hygiene state must be owner-only.')
+        existing_hygiene = bounded_json(hygiene_state / 'hygiene-policy.json', 4096)
+        if existing_hygiene and existing_hygiene != {'schema': 1, 'mode': 'enforce'}:
+            raise ValueError('Existing hygiene policy differs; preserved for operator review.')
     changed = copy.deepcopy(data)
     receipt = kit / 'install-receipt.json'
     previous = read_receipt(receipt)
@@ -334,6 +342,19 @@ def _operate_locked(home, platform, uninstall, target, kit, mcp=None):
                 os.replace(staged, existing_policy)
             if not any(runtime_backup.iterdir()):
                 runtime_backup.rmdir()  # Empty generated temporary directory only.
+    if hygiene_enforcement and not uninstall:
+        state = kit / 'state' if platform == 'codex' else kit
+        safe_path(state, True)
+        state.mkdir(mode=0o700, exist_ok=True)
+        if state.stat().st_mode & 0o077:
+            raise ValueError('Hygiene state must be owner-only.')
+        policy = state / 'hygiene-policy.json'
+        expected_policy = {'schema': 1, 'mode': 'enforce'}
+        previous_policy = bounded_json(policy, 4096)
+        if previous_policy and previous_policy != expected_policy:
+            raise ValueError('Existing hygiene policy differs; preserved for operator review.')
+        if not previous_policy:
+            write_json(policy, expected_policy)
     if changed != data:
         backup = backup_dir / (stamp + '-' + target.name)
         if target.exists():
@@ -348,7 +369,8 @@ def _operate_locked(home, platform, uninstall, target, kit, mcp=None):
         apply_mcp(mcp, backup_dir, stamp)
     write_json(receipt, {'platform': platform, 'owned': new_owned, 'uninstalled': uninstall, 'original_had_hooks': original_had_hooks, 'original_empty_events': original_empty_events})
     return {'platform': platform, 'config': str(target), 'backup': str(backup) if backup else None,
-            'action': 'uninstalled' if uninstall else 'installed', 'runtime_retained': uninstall, 'learning_mcp_configured': mcp is not None and not uninstall}
+            'action': 'uninstalled' if uninstall else 'installed', 'runtime_retained': uninstall, 'learning_mcp_configured': mcp is not None and not uninstall,
+            'hygiene_enforcement_requested': bool(hygiene_enforcement and not uninstall)}
 
 
 def main() -> int:
@@ -356,6 +378,7 @@ def main() -> int:
     parser.add_argument('--platform', choices=('codex', 'claude', 'both'), required=True)
     parser.add_argument('--home', type=Path, default=Path.home(), help='Alternate home; does not activate hooks in your real account.')
     parser.add_argument('--uninstall', action='store_true')
+    parser.add_argument('--hygiene-enforcement', action='store_true', help='Opt in to strict supported-file hygiene; blocks uninspectable shell writes. Read docs/hygiene-enforcement.md first.')
     parser.add_argument('--learning-mcp', action='store_true', help='Opt in to a local stdio broker; native runtime coverage is pending.')
     parser.add_argument('--state-dir', type=Path, help='Absolute shared learning store; defaults under the selected home.')
     parser.add_argument('--policy-root', type=Path, help='Existing absolute operator policy directory; never bundled.')
@@ -366,7 +389,7 @@ def main() -> int:
     completed = []
     try:
         for platform in ('codex', 'claude') if args.platform == 'both' else (args.platform,):
-            result = operate(home, platform, args.uninstall, learning_mcp=args.learning_mcp, state_dir=args.state_dir, policy_root=args.policy_root)
+            result = operate(home, platform, args.uninstall, learning_mcp=args.learning_mcp, state_dir=args.state_dir, policy_root=args.policy_root, hygiene_enforcement=args.hygiene_enforcement)
             completed.append(platform)
             print(json.dumps(result))
     except (OSError, ValueError) as exc:

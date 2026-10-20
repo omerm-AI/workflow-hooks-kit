@@ -72,3 +72,7 @@ and does not prove automatic tool invocation. Generic native runtime coverage
 is pending. See [broker configuration and limitations](../learning/MCP.md).
 Ordinary uninstall also removes unchanged installer-owned MCP definitions;
 modified or unrelated definitions, policy, learning state and backups survive.
+
+## Optional strict hygiene
+
+Use `python3 install.py --platform codex --hygiene-enforcement` or the corresponding `--platform claude` only after reading [strict hygiene](hygiene-enforcement.md). Test with an alternate `--home` first. This is operator opt-in, not an unconditional production or customer acceptance certificate. Verify native activation separately; retained user/project settings can change runtime coverage.

@@ -23,7 +23,7 @@ def global_adapter_active(home: Path) -> bool:
             matcher = MATCHER if event in {'PreToolUse', 'PostToolUse'} else None
             if not any(group.get('matcher') == matcher and any(h.get('command') == expected for h in group.get('hooks', [])) for group in data.get('hooks', {}).get(event, [])):
                 return False
-        runtime_sources = ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py')
+        runtime_sources = ('tool_scope_hook.py', 'session_workflow_hook.py', 'hook_receipt.py', 'native_receipt.py', 'hygiene_guard.py', 'hygiene_adapter.py')
         return all((script.parent / name).read_bytes() == (ROOT / 'scripts' / name).read_bytes()
                    for name in runtime_sources)
     except (OSError, ValueError, TypeError, AttributeError):
@@ -65,9 +65,12 @@ def main() -> None:
         result = {'systemMessage': f'Workflow plugin input error (fail-open): {type(exc).__name__}.'}
     if isinstance(payload, dict):
         event, tool = core._event(payload), core._tool_name(payload)
+        if tool in {"exec_command", "shell_command"}:
+            tool = "Bash"
         receipt_state = core.CLAUDE_STATE / 'hook-receipts' / 'plugin-adapter'
         components = (
-            Path(__file__), Path(core.__file__), Path(core.workflow.__file__),
+            Path(__file__), Path(core.__file__), Path(core.workflow.__file__), Path(__file__).with_name("hygiene_guard.py"),
+            Path(__file__).with_name("hygiene_adapter.py"),
         )
         try:
             import native_receipt
