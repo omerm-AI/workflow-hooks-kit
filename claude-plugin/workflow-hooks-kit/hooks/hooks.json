@@ -28,10 +28,11 @@
           {
             "type": "command",
             "command": "python3 -B \"${CLAUDE_PLUGIN_ROOT}/scripts/plugin_adapter.py\"",
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "block"
           }
         ],
-        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
+        "matcher": ".*"
       }
     ],
     "PostToolUse": [
@@ -43,7 +44,7 @@
             "timeout": 10
           }
         ],
-        "matcher": "Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit"
+        "matcher": ".*"
       }
     ],
     "Stop": [

@@ -17,18 +17,21 @@ import os
 
 EVENTS = ('UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop')
 SOURCE = Path(__file__).resolve().parent / 'claude-plugin/workflow-hooks-kit'
-MATCHER = 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit'
+MATCHER = '.*'
+LEGACY_MATCHERS = {'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit', 'Bash|apply_patch|Edit|Write|MultiEdit|NotebookEdit|Agent|spawn_agent'}
 LEARNING = Path(__file__).resolve().parent / 'learning'
 MAX_CONFIG = 4_000_000
 
 
 def command(home: Path, platform: str) -> str:
     script = home / ('.codex' if platform == 'codex' else '.claude') / 'workflow-hooks-kit/bin/tool_scope_hook.py'
-    return 'python3 -B ' + shlex.quote(str(script)) + (' --claude' if platform == 'claude' else '')
+    return 'env HOME=' + shlex.quote(str(home)) + ' python3 -B ' + shlex.quote(str(script)) + (' --claude' if platform == 'claude' else '')
 
 
 def entry(home: Path, platform: str, event: str) -> dict:
     hook = {'type': 'command', 'command': command(home, platform), 'timeout': 10}
+    if platform == 'claude' and event == 'PreToolUse':
+        hook['onFailure'] = 'block'
     if platform == 'codex' and event == 'UserPromptSubmit':
         hook['additionalContextLimit'] = 300
     group = {'hooks': [hook]}
@@ -69,7 +72,7 @@ def read_config(path: Path) -> dict:
 def read_receipt(path: Path) -> dict:
     data = bounded_json(path, 64_000)
     owned = data.get('owned', {})
-    if not isinstance(owned, dict) or any(event not in EVENTS or not isinstance(value, dict) or not isinstance(value.get('hook'), dict) or value.get('matcher') not in (None, MATCHER) for event, value in owned.items()):
+    if not isinstance(owned, dict) or any(event not in EVENTS or not isinstance(value, dict) or not isinstance(value.get('hook'), dict) or value.get('matcher') not in (None, MATCHER, *LEGACY_MATCHERS) for event, value in owned.items()):
         raise ValueError('Invalid installer ownership receipt.')
     return data
 
@@ -119,18 +122,144 @@ def installation_lock(base: Path):
         os.close(fd)
 
 
-def operate(home: Path, platform: str, uninstall: bool = False) -> dict:
+MCP_NAME = 'workflow_learning'
+MCP_START = '# BEGIN workflow-hooks-kit learning MCP\n'
+MCP_END = '# END workflow-hooks-kit learning MCP\n'
+
+
+def mcp_definition(kit, state_dir, policy_root=None):
+    args = ['-B', str(kit / 'learning/mcp_server.py'), '--state-dir', str(state_dir)]
+    if policy_root is not None:
+        args += ['--policy-root', str(policy_root)]
+    return {'command': sys.executable, 'args': args}
+
+
+def mcp_plan(home, platform, kit, uninstall, state_dir, policy_root):
+    """Prepare exact owned edits before hook activation; never claim existing entries."""
+    target = home / ('.codex/config.toml' if platform == 'codex' else '.claude.json')
+    receipt = kit / 'mcp-install-receipt.json'
+    previous = bounded_json(receipt, 64_000)
+    owner = previous.get('owned')
+    if owner is not None and not isinstance(owner, (dict, str)):
+        raise ValueError('Invalid MCP ownership receipt.')
+    safe_path(target)
+    before = target.read_bytes() if target.exists() else b''
+    if len(before) > MAX_CONFIG:
+        raise ValueError('MCP config exceeds bounded size.')
+    definition = mcp_definition(kit, state_dir, policy_root)
+    new_owner = None
+    if platform == 'claude':
+        data = bounded_json(target, MAX_CONFIG)
+        changed = copy.deepcopy(data)
+        servers = changed.get('mcpServers', {})
+        if not isinstance(servers, dict):
+            raise ValueError('mcpServers must be an object.')
+        current = servers.get(MCP_NAME)
+        if owner is not None and current == owner:
+            servers.pop(MCP_NAME)
+        elif owner is not None and not uninstall:
+            raise ValueError('Owned MCP definition changed; preserved without replacement.')
+        if not uninstall:
+            if MCP_NAME in servers and servers[MCP_NAME] != definition:
+                raise ValueError('Existing MCP name collision; preserved without replacement.')
+            if MCP_NAME not in servers:
+                servers[MCP_NAME] = definition
+                new_owner = definition
+        if servers:
+            changed['mcpServers'] = servers
+        elif not previous.get('original_had_servers', 'mcpServers' in data):
+            changed.pop('mcpServers', None)
+        after = (json.dumps(changed, indent=2, ensure_ascii=False) + '\n').encode() if changed != data else before
+        original = previous.get('original_had_servers', 'mcpServers' in data)
+    else:
+        try:
+            import tomllib
+        except ImportError as exc:
+            raise ValueError('Optional Codex MCP installation requires Python 3.11+ for safe TOML validation.') from exc
+        text = before.decode('utf-8')
+        data = tomllib.loads(text)
+        current = data.get('mcp_servers', {}).get(MCP_NAME)
+        if owner is not None:
+            if not isinstance(owner, str) or not owner.lstrip('\n').startswith(MCP_START) or not owner.endswith(MCP_END):
+                raise ValueError('Invalid MCP TOML ownership receipt.')
+            if text.count(owner) == 1:
+                text = text.replace(owner, '', 1)
+                current = tomllib.loads(text).get('mcp_servers', {}).get(MCP_NAME)
+            elif not uninstall:
+                raise ValueError('Owned MCP definition changed; preserved without replacement.')
+        if not uninstall:
+            if current is not None:
+                if current != definition:
+                    raise ValueError('Existing MCP name collision; preserved without replacement.')
+            else:
+                block = MCP_START + '[mcp_servers.' + MCP_NAME + ']\n'
+                block += 'command = ' + json.dumps(definition['command']) + '\n'
+                block += 'args = ' + json.dumps(definition['args']) + '\n' + MCP_END
+                # Own the separator too, so unchanged uninstall restores exact original bytes.
+                new_owner = ('\n' if text and not text.endswith('\n') else '') + block
+                text += new_owner
+        after = text.encode()
+        tomllib.loads(text)
+        original = False
+    return {'target': target, 'receipt': receipt, 'before': before, 'after': after,
+            'owned': new_owner, 'original_had_servers': original}
+
+
+def apply_mcp(plan, backup_dir, stamp):
+    target = plan['target']
+    safe_path(target)
+    current = target.read_bytes() if target.exists() else b''
+    if current != plan['before']:
+        raise ValueError('MCP config changed during install; no MCP configuration replaced.')
+    if plan['after'] != plan['before']:
+        backup = backup_dir / (stamp + '-mcp-' + target.name)
+        if target.exists():
+            shutil.copy2(target, backup)
+        else:
+            write_json(backup, {'config_was_absent': True})
+        fd, tmp = tempfile.mkstemp(prefix='.workflow-mcp-', dir=target.parent)
+        try:
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(plan['after'])
+            os.replace(tmp, target)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+    write_json(plan['receipt'], {'owned': plan['owned'], 'original_had_servers': plan['original_had_servers']})
+
+
+def operate(home: Path, platform: str, uninstall: bool = False, *, learning_mcp=False, state_dir=None, policy_root=None, hygiene_enforcement=False, hygiene_file_tools=False) -> dict:
+    if hygiene_enforcement and hygiene_file_tools:
+        raise ValueError('Choose strict enforcement or file-tools mode, never both.')
     base = home / ('.codex' if platform == 'codex' else '.claude')
     target = base / ('hooks.json' if platform == 'codex' else 'settings.json')
     kit = base / 'workflow-hooks-kit'
     preflight(base, target, kit)
     with installation_lock(base):
         preflight(base, target, kit)
-        return _operate_locked(home, platform, uninstall, target, kit)
+        state_dir = state_dir or home / '.local/share/workflow-hooks-kit/learning'
+        if learning_mcp and not uninstall:
+            for path in (state_dir, policy_root):
+                if path is not None and not path.is_absolute():
+                    raise ValueError('MCP state and policy paths must be absolute.')
+            if policy_root is not None:
+                safe_path(policy_root, True)
+                if not policy_root.is_dir():
+                    raise ValueError('Policy root must already exist.')
+        plan = mcp_plan(home, platform, kit, uninstall, state_dir, policy_root) if learning_mcp or (uninstall and (kit / 'mcp-install-receipt.json').exists()) else None
+        return _operate_locked(home, platform, uninstall, target, kit, plan, hygiene_enforcement=hygiene_enforcement, hygiene_file_tools=hygiene_file_tools)
 
 
-def _operate_locked(home, platform, uninstall, target, kit):
+def _operate_locked(home, platform, uninstall, target, kit, mcp=None, *, hygiene_enforcement=False, hygiene_file_tools=False):
     data = read_config(target)
+    if (hygiene_enforcement or hygiene_file_tools) and not uninstall:
+        hygiene_state = kit / 'state' if platform == 'codex' else kit
+        safe_path(hygiene_state, True)
+        if hygiene_state.exists() and hygiene_state.stat().st_mode & 0o077:
+            raise ValueError('Hygiene state must be owner-only.')
+        existing_hygiene = bounded_json(hygiene_state / 'hygiene-policy.json', 4096)
+        if existing_hygiene and existing_hygiene != {'schema': 1, 'mode': 'file-tools' if hygiene_file_tools else 'enforce'}:
+            raise ValueError('Existing hygiene policy differs; preserved for operator review.')
     changed = copy.deepcopy(data)
     receipt = kit / 'install-receipt.json'
     previous = read_receipt(receipt)
@@ -144,7 +273,10 @@ def _operate_locked(home, platform, uninstall, target, kit):
         exact = expected['hooks'][0]
         current = hooks.get(event, [])
         owner = owned.get(event)
-        if owner and (owner['hook'] != exact or owner.get('matcher') != expected.get('matcher')):
+        legacy_hook = {key: value for key, value in exact.items() if key != 'onFailure'}
+        prior_command = exact['command'].removeprefix('env HOME=' + shlex.quote(str(home)) + ' ')
+        previous_hook = {**legacy_hook, 'command': prior_command}
+        if owner and (owner['hook'] not in (exact, legacy_hook, previous_hook) or owner.get('matcher') not in (expected.get('matcher'), *LEGACY_MATCHERS)):
             raise ValueError('Receipt does not describe this installer command and matcher.')
         groups = []
         removed = False
@@ -185,6 +317,10 @@ def _operate_locked(home, platform, uninstall, target, kit):
                 shutil.copy2(source, staged_bin / source.name)
             shutil.copy2(LEARNING / 'cli.py', staged_bin / 'learning_cli.py')
             shutil.copy2(LEARNING / 'README.md', staging / 'LEARNING.md')
+            staged_learning = staging / 'learning'
+            staged_learning.mkdir()
+            for name in ('cli.py', 'mcp_server.py', 'prompt_hook.py', 'MCP.md'):
+                shutil.copy2(LEARNING / name, staged_learning / name)
             staged_policy = staging / 'WORK_STANDARDS.md'
             shutil.copy2(SOURCE / 'skills/work-standards/SKILL.md', staged_policy)
             # Preserve previous bytes before any runtime replacement.
@@ -197,6 +333,14 @@ def _operate_locked(home, platform, uninstall, target, kit):
                 if existing.exists() and existing.read_bytes() != source.read_bytes():
                     shutil.copy2(existing, runtime_backup / source.name)
                 os.replace(source, existing)
+            learning_runtime = kit / 'learning'
+            learning_runtime.mkdir(exist_ok=True)
+            for source in staged_learning.iterdir():
+                existing = learning_runtime / source.name
+                if existing.exists() and existing.read_bytes() != source.read_bytes():
+                    (runtime_backup / 'learning').mkdir(exist_ok=True)
+                    shutil.copy2(existing, runtime_backup / 'learning' / source.name)
+                os.replace(source, existing)
             for name in ('WORK_STANDARDS.md', 'LEARNING.md'):
                 staged = staging / name
                 existing_policy = kit / name
@@ -205,6 +349,19 @@ def _operate_locked(home, platform, uninstall, target, kit):
                 os.replace(staged, existing_policy)
             if not any(runtime_backup.iterdir()):
                 runtime_backup.rmdir()  # Empty generated temporary directory only.
+    if (hygiene_enforcement or hygiene_file_tools) and not uninstall:
+        state = kit / 'state' if platform == 'codex' else kit
+        safe_path(state, True)
+        state.mkdir(mode=0o700, exist_ok=True)
+        if state.stat().st_mode & 0o077:
+            raise ValueError('Hygiene state must be owner-only.')
+        policy = state / 'hygiene-policy.json'
+        expected_policy = {'schema': 1, 'mode': 'file-tools' if hygiene_file_tools else 'enforce'}
+        previous_policy = bounded_json(policy, 4096)
+        if previous_policy and previous_policy != expected_policy:
+            raise ValueError('Existing hygiene policy differs; preserved for operator review.')
+        if not previous_policy:
+            write_json(policy, expected_policy)
     if changed != data:
         backup = backup_dir / (stamp + '-' + target.name)
         if target.exists():
@@ -215,9 +372,13 @@ def _operate_locked(home, platform, uninstall, target, kit):
         if read_config(target) != data:
             raise ValueError('Config changed during install; retry after reviewing concurrent edits.')
         write_json(target, changed)
+    if mcp is not None:
+        apply_mcp(mcp, backup_dir, stamp)
     write_json(receipt, {'platform': platform, 'owned': new_owned, 'uninstalled': uninstall, 'original_had_hooks': original_had_hooks, 'original_empty_events': original_empty_events})
     return {'platform': platform, 'config': str(target), 'backup': str(backup) if backup else None,
-            'action': 'uninstalled' if uninstall else 'installed', 'runtime_retained': uninstall}
+            'action': 'uninstalled' if uninstall else 'installed', 'runtime_retained': uninstall, 'learning_mcp_configured': mcp is not None and not uninstall,
+            'hygiene_enforcement_requested': bool(hygiene_enforcement and not uninstall),
+            'hygiene_file_tools_requested': bool(hygiene_file_tools and not uninstall)}
 
 
 def main() -> int:
@@ -225,6 +386,12 @@ def main() -> int:
     parser.add_argument('--platform', choices=('codex', 'claude', 'both'), required=True)
     parser.add_argument('--home', type=Path, default=Path.home(), help='Alternate home; does not activate hooks in your real account.')
     parser.add_argument('--uninstall', action='store_true')
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--hygiene-enforcement', action='store_true', help='Opt in to strict supported-file hygiene; blocks uninspectable shell writes. Read docs/hygiene-enforcement.md first.')
+    modes.add_argument('--hygiene-file-tools', action='store_true', help='Gate known native file saves and Stop only. Ordinary shell and connectors retain baseline behavior and are not covered.')
+    parser.add_argument('--learning-mcp', action='store_true', help='Opt in to a local stdio broker; native runtime coverage is pending.')
+    parser.add_argument('--state-dir', type=Path, help='Absolute shared learning store; defaults under the selected home.')
+    parser.add_argument('--policy-root', type=Path, help='Existing absolute operator policy directory; never bundled.')
     args = parser.parse_args()
     if sys.version_info < (3, 9) or sys.platform not in ('darwin', 'linux'):
         parser.error('Requires Python 3.9+ on macOS/Linux.')
@@ -232,7 +399,7 @@ def main() -> int:
     completed = []
     try:
         for platform in ('codex', 'claude') if args.platform == 'both' else (args.platform,):
-            result = operate(home, platform, args.uninstall)
+            result = operate(home, platform, args.uninstall, learning_mcp=args.learning_mcp, state_dir=args.state_dir, policy_root=args.policy_root, hygiene_enforcement=args.hygiene_enforcement, hygiene_file_tools=args.hygiene_file_tools)
             completed.append(platform)
             print(json.dumps(result))
     except (OSError, ValueError) as exc:

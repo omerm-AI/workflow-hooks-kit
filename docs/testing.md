@@ -16,3 +16,11 @@ python3 tools/build_plugin.py
 ```
 
 CI repeats the suites and build on macOS/Linux with Python 3.9/3.12. A CI job is not evidence of platform hook activation. The neutral public package has not been freshly exercised through every supported desktop UI; each installation needs its own native trust and activation check. Windows, arbitrary remote/MCP write tools, automatic model routing, full transcript learning and live cloud policy synchronization are not validated features.
+
+Optional MCP integration tests use temporary homes and local stdio subprocesses.
+They verify shared paths, adjacent `cli.py` packaging, exact ownership removal,
+name collision preservation, changed definition preservation and disabled-by-
+default plugin packaging. Codex TOML integration tests require Python 3.11+;
+Python 3.9/3.10 exercise basic hooks and Claude JSON registration only.
+These tests are not native client runtime evidence. Generic old/new session,
+Cowork, desktop and Code coverage remains pending until separately recorded.

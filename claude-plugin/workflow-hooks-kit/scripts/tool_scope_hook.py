@@ -18,7 +18,12 @@ import time
 import tempfile
 from typing import Any
 
-import session_workflow_hook as workflow
+try:
+    import session_workflow_hook as workflow
+    import delegation_gate
+except Exception:
+    sys.stderr.write("Hook dependency unavailable; action not authorized.\n")
+    raise SystemExit(2)
 
 MAX_INPUT = 1_000_000
 MAX_BODY = 32_768
@@ -28,6 +33,7 @@ MAX_PATH_CHARS = 4096
 MAX_LEDGER = workflow.MAX_LEDGER
 CLAUDE_STATE = Path.home() / ".claude" / "workflow-hooks-kit"
 EDIT_TOOLS = {"Edit", "Write", "apply_patch", "NotebookEdit", "MultiEdit"}
+DELEGATION_TOOLS = delegation_gate.DELEGATION_TOOLS
 RG_FLAGS = {"--no-config", "--files", "--hidden", "--no-ignore", "--no-ignore-vcs", "--no-messages", "--line-number", "--files-with-matches", "--files-without-match", "--count", "--count-matches", "--ignore-case", "--fixed-strings", "--word-regexp", "--invert-match", "--only-matching", "--json", "--stats", "--quiet", "--no-heading", "--heading", "--with-filename", "--no-filename", "-n", "-l", "-L", "-c", "-i", "-F", "-w", "-v", "-o", "-q"}
 RG_VALUES = {"--glob", "--iglob", "--regexp", "--file", "--max-count", "--max-depth", "--type", "--type-not", "--context", "--before-context", "--after-context", "--color", "-g", "-e", "-f", "-m", "-t", "-T", "-C", "-B", "-A"}
 PATCH_PATH = re.compile(r"^[ \t]*\*\*\*[ \t]+(?:(?:Add|Update|Delete)[ \t]+File|Move[ \t]+to):[ \t]*(.*?)[ \t]*$", re.M)
@@ -607,6 +613,8 @@ def _pre(p: dict[str, Any], state: Path) -> dict[str, Any]:
     data = _input(p)
     if event != "PreToolUse":
         return {}
+    if tool in DELEGATION_TOOLS:
+        return delegation_gate.check(sys.modules[__name__], p, state)
     if tool == "Bash":
         command = data.get("command")
         parsed = _parse_ledger_command(command)
@@ -898,7 +906,7 @@ def _post(p: dict[str, Any], state: Path) -> dict[str, Any]:
     return {}
 
 
-def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
+def _baseline_run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
     """Run one hook event. Claude uses its own state namespace and prompt_id turn key."""
     original_state = workflow.STATE
     try:
@@ -917,6 +925,8 @@ def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
         # Prompt and Stop hooks share the exact workflow contract, with isolated storage.
         return workflow.run(normalized)
     except Exception as exc:
+        if _tool_name(payload) in DELEGATION_TOOLS and _event(payload) == "PreToolUse":
+            return _deny("PreToolUse", f"Delegation gate unavailable: {type(exc).__name__}; repair task identity/state before retrying.")
         if _tool_name(payload) == "Bash":
             command = _input(payload).get("command")
             try:
@@ -925,24 +935,74 @@ def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
                 intercepted = isinstance(command, str) and bool(re.match(r"^\s*[\'\"]?workflow-ledger", command))
             if intercepted:
                 return _deny("PreToolUse", f"Ledger command intercepted; handler error: {type(exc).__name__}. No shell command executed.")
+        if _event(payload) == "PreToolUse" and _tool_name(payload) in EDIT_TOOLS | {"Bash"}:
+            return _deny("PreToolUse", f"Hook enforcement failed: {type(exc).__name__}; operation denied.")
         return {"systemMessage": f"Tool scope hook error (fail-open): {type(exc).__name__}: {exc}"}
     finally:
         workflow.STATE = original_state
+
+
+def run(payload: dict[str, Any], claude: bool = False) -> dict[str, Any]:
+    # Hygiene is operator-enabled and leaves existing contracts unchanged otherwise.
+    state = CLAUDE_STATE if claude else workflow.STATE
+    normalized = dict(payload)
+    if claude and not normalized.get("turn_id") and normalized.get("prompt_id"):
+        normalized["turn_id"] = normalized["prompt_id"]
+    try:
+        import hygiene_adapter
+        normalized = hygiene_adapter.normalize_shell(sys.modules[__name__], normalized)
+        return hygiene_adapter.run(sys.modules[__name__], normalized, state,
+                                   lambda: _baseline_run(normalized, claude=claude))
+    except Exception as exc:
+        if _event(payload) == "Stop":
+            return {"decision": "block", "reason": "Hygiene validation unavailable: " + type(exc).__name__}
+        if _event(payload) == "PreToolUse":
+            return _deny("PreToolUse", "Hygiene validation unavailable: " + type(exc).__name__)
+        return {"systemMessage": "Hygiene validation unavailable: " + type(exc).__name__}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--claude", action="store_true")
     args, _ = parser.parse_known_args(argv)
+    payload = None
     try:
         raw = sys.stdin.buffer.read(MAX_INPUT + 1)
         if len(raw) > MAX_INPUT:
-            result = {"systemMessage": "Tool scope hook input exceeds limit (fail-open)."}
+            raise ValueError("input exceeds limit")
         else:
             payload = json.loads(raw.decode("utf-8"))
-            result = run(payload, claude=args.claude) if isinstance(payload, dict) else {}
+            if not isinstance(payload, dict):
+                raise ValueError("input must be an object")
+            result = run(payload, claude=args.claude)
     except Exception as exc:
-        result = {"systemMessage": f"Tool scope hook input error (fail-open): {type(exc).__name__}: {exc}"}
+        sys.stderr.write(f"Hook input rejected: {type(exc).__name__}; action not authorized.\n")
+        return 2
+    if isinstance(payload, dict):
+        event, tool = _event(payload), _tool_name(payload)
+        if tool in {"exec_command", "shell_command"}:
+            tool = "Bash"
+        receipt_root = CLAUDE_STATE if args.claude else workflow.STATE.parent
+        receipt_state = receipt_root / "hook-receipts" / "tool-scope"
+        try:
+            import native_receipt
+            components = (
+                Path(__file__), Path(workflow.__file__), Path(__file__).with_name("hook_receipt.py"),
+                Path(native_receipt.__file__), Path(__file__).with_name("hygiene_guard.py"),
+                Path(__file__).with_name("hygiene_adapter.py"),
+                Path(__file__).with_name("hygiene_check.py"),
+            )
+            handler = "tool-scope-claude-v1" if args.claude else "tool-scope-codex-v1"
+            version = native_receipt.handler_version(handler, components)
+            native_receipt.create_native(receipt_state, payload, native_receipt.outcome_for(result), version)
+        except Exception as exc:
+            sys.stderr.write(f"Native hook receipt unavailable: {type(exc).__name__}.\n")
+            denied = (isinstance(result, dict) and isinstance(result.get("hookSpecificOutput"), dict)
+                      and result["hookSpecificOutput"].get("permissionDecision") == "deny")
+            if event == "PreToolUse" and not denied:
+                result = _deny("PreToolUse", f"Hook receipt unavailable: {type(exc).__name__}; operation denied.")
+            elif event == "Stop":
+                result = {"decision": "block", "reason": "Hook receipt unavailable; completion not verified."}
     sys.stdout.write(json.dumps(result, ensure_ascii=False) + "\n")
     return 0
 

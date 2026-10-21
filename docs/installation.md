@@ -53,3 +53,26 @@ python3 install.py --platform claude --uninstall
 ```
 
 Remove an uploaded account plugin through that host's plugin settings separately. Local uninstall preserves changed/unrelated configuration, local data and backups. It does not remove an independently uploaded plugin.
+
+## Optional shared local learning broker
+
+The default install and release plugin leave MCP disabled. For explicit local
+registration, use Python 3.11+ and a shared private store:
+
+```sh
+python3.11 install.py --platform both --learning-mcp \
+  --state-dir /absolute/private/shared-learning \
+  --policy-root /absolute/private/policies
+```
+
+The policy directory is optional and must already exist. Both local hosts use
+that same state path. No model/API/network call is made by installation or the
+broker. Local client registration does not activate a Cowork account plugin,
+and does not prove automatic tool invocation. Generic native runtime coverage
+is pending. See [broker configuration and limitations](../learning/MCP.md).
+Ordinary uninstall also removes unchanged installer-owned MCP definitions;
+modified or unrelated definitions, policy, learning state and backups survive.
+
+## Optional strict hygiene
+
+Use `python3 install.py --platform codex --hygiene-enforcement` or the corresponding `--platform claude` only after reading [strict hygiene](hygiene-enforcement.md). Test with an alternate `--home` first. This is operator opt-in, not an unconditional production or customer acceptance certificate. Verify native activation separately; retained user/project settings can change runtime coverage.

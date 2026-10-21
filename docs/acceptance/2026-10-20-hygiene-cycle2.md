@@ -1,0 +1,22 @@
+# Hygiene cycle 2 acceptance
+
+Date: 2026-10-20. Explicit authorization: up to three further iterations; subscription only, no model API credentials. Status is scoped: **Tested and proven** or **Open**, never an unconditional 100% guarantee.
+
+| Boundary | Codex | Claude Code | Evidence/reason |
+|---|---|---|---|
+| Existing-target overwrite, exact Old beforeimage and actual next-edit denial | Tested and proven | Tested and proven | Codex earlier native acceptance retained. Claude cycle2 first trial performed Read, a successful overwrite and an actual second Write denied before its target existed; eight signed records matched native IDs and frozen source. |
+| Hygiene Stop block | Tested and proven | Tested and proven | Actual native outputs; Claude also observed a blocked repeated Stop. A three-request observer cap used a disclosed synthetic empty answer to reach native Stop without another inference. This is not normal successful completion. |
+| Empty observed user/work instruction sources in parent hygiene trial | Open | Tested and proven | Claude instruction-file/MCP/skill/submission inventories were empty; optional user-email text omitted. Engine environment/model/date/token reminders were retained, inventoried and inspected. Vendor system/safety sections were unchanged. Codex's corrected native writes lack the equivalent OS instruction-source isolation. |
+| Complete absence of all engine or hidden context | Open | Open | Vendor context is retained; the experiment cannot certify every unobservable internal source. |
+| Delivered-tool strict allow/deny boundary and malformed input | Tested and proven | Tested and proven | Independent component/CLI tests cover full identities, unknown MCP, namespaced alias spoofing, interpreter wrappers, ordinary shell denial, bounded read, bad policy, missing dependency and missing receipt. This is component evidence, not native coverage of every connector. |
+| Actual recorded alternate-home installation commands | Tested and proven | Tested and proven | The first test reproduced ignored strict policy when callback inherited another HOME. The corrected installed command binds HOME to the chosen target. Independent regression invokes the recorded config command from a different caller home and verifies state isolation. |
+| Repeat install, foreign settings, legacy-owned migration and uninstall | Tested and proven | Tested and proven | Independent tests and disposable installed-command smoke cover one owned handler/event, retained foreign settings, known old command/matcher upgrade and recoverable uninstall. |
+| Universal native write-path/global adoption | Open | Open | Broad matching covers only events actually delivered. Native trust, runtime errors, project/managed overrides, already-open sessions and unobserved children remain distinct requirements. No universal OS/MCP sandbox is asserted. |
+
+The main suite passed 223 tests. The new independent boundary module passed 14 tests. Four public installed-command smoke cases and four private-core compatibility replays passed with zero model calls. The smoke is explicitly labeled installed-command replay, not a native-client session; its harness performs the write between real callback-command invocations. The existing-project fixture is populated before installation; installation must leave it unchanged and create no Old directory.
+
+The Claude native trial used three forwarded subscription requests. A model-free plugin validator/preflight caught an observer declaration error before any inference; the corrected startup ran with outbound network denied. No paid retries or API fallback were used. Raw IDs, private paths, account metadata, source snapshots, local receipts and vendor context remain private.
+
+Installation changes account hook configuration/runtime and private state. It does not scan every folder, migrate old content or reorganize project files on install. New and existing project folders receive the supported guards on future covered work; only actual file operations create prior-version backups or reviewed transfers. General obsolete-file inference and every dynamic/external dependency remain **Open**.
+
+Customer bootstrap instructions and the immutable preview tag must be checked from a fresh remote clone before delivery. Global operator installation remains a separate acceptance boundary; a saved config is never proof of activation. See [customer guide](../customer-install.md), [strict contract](../hygiene-enforcement.md), and [previous native acceptance](2026-10-20-hygiene.md).
