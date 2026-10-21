@@ -6,6 +6,8 @@ Version 0.1.0. Portable local planning, scope and verification checkpoints for C
 
 Start with the [step-by-step customer guide](docs/customer-install.md), or give your agent the [Codex install prompt](prompts/install-hygiene-codex.he.txt) / [Claude Code install prompt](prompts/install-hygiene-claude-code.he.txt). These install the reviewed opt-in preview rather than relying on memory. Installation does not retroactively reorganize projects; protection applies to future covered work in new or existing folders. The selected file-tools preview gates known native saves; shell/connector writes remain explicitly uncovered. Read the mode limits before activation.
 
+The newer consent-based organization and contextual folder-guide component is published separately as [Project Hygiene Kit](https://github.com/omerm-AI/project-hygiene-kit). Read its current [acceptance status](https://github.com/omerm-AI/project-hygiene-kit/blob/main/docs/acceptance.md): its first native upgrade trials exposed an advisory-policy conflict, so the upgrade remains a preview and is not approved for persistent activation. Earlier base-kit proof does not prove the new component or override local warning-only policy.
+
 ## Install
 
 Start with [platform-specific download and installation steps](docs/installation.md).
